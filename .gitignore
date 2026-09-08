@@ -1,0 +1,32 @@
+# data never goes into git
+/data/
+*.parquet
+*.bi5
+*.csv
+
+# outputs
+figures/
+*.png
+outputs/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# jupyter
+.ipynb_checkpoints/
+
+# ide
+.idea/
+.vscode/
+.DS_Store
