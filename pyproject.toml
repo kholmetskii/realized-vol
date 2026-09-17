@@ -44,7 +44,7 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "UP", "B", "SIM", "NPY"]
 
 [tool.mypy]
-python_version = "3.11"
-packages = ["rvol"]
+files = ["src", "tests"]
+mypy_path = "src"
 ignore_missing_imports = true
 warn_unused_ignores = true
