@@ -31,7 +31,8 @@ with error?
 
 Sample: EURUSD tick quotes from Dukascopy, 1 January to 31 March 2024 —
 5,359,908 ticks over 64 trading sessions, each running 21:00 to 21:00 UTC
-(17:00 New York). Median quoted spread 0.19 bps, no crossed quotes.
+(17:00 New York, daylight saving included). Median quoted spread 0.19 bps, no
+crossed quotes.
 
 Realized variance is computed per session at sampling intervals from 1 second
 to 1 hour, then averaged across sessions and annualised.
@@ -58,23 +59,23 @@ one-sided t-test on the log ratios — removes it (`rvol.estimators.signature.no
 
 | price | RV(1s)/RV(5min) | t | p | implied noise sd |
 |---|---|---|---|---|
-| mid | 1.0763 | 2.49 | 0.0077 | 0.029 bps |
-| bid | 1.1771 | 5.22 | 1.1e-06 | 0.049 bps |
-| ask | 1.1777 | 5.31 | 7.6e-07 | 0.048 bps |
+| mid | 1.0780 | 2.55 | 0.0066 | 0.030 bps |
+| bid | 1.1794 | 5.29 | 8.2e-07 | 0.049 bps |
+| ask | 1.1811 | 5.43 | 4.8e-07 | 0.048 bps |
 
 The noise standard deviation is backed out from E[RV_n] = IV + 2n*omega^2.
 
 Three things follow.
 
 **Mid-price noise is real but small.** Second-by-second sampling inflates
-variance by 7.6%, i.e. volatility by 3.7%. The unpaired figure could not
+variance by 7.8%, i.e. volatility by 3.8%. The unpaired figure could not
 resolve this; the effect was always there, buried under volatility swings.
 
 **Bid and ask agree to within 2%** — 0.049 against 0.048 bps — as they should,
 since neither side of the quote is special. A useful check on the pipeline.
 
 **The mid is cleaner than averaging alone explains.** Independent noise on each
-quote would give 0.049/sqrt(2) = 0.035 bps for the mid; the measured 0.029 bps
+quote would give 0.049/sqrt(2) = 0.035 bps for the mid; the measured 0.030 bps
 is lower, so the two are negatively correlated. The spread widens and narrows
 around the efficient price, and those moves cancel in the mid while showing up
 in each quote. Quote noise at 0.049 bps is also about half the 0.095 bps
