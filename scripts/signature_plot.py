@@ -19,7 +19,8 @@ from rvol.estimators.signature import signature  # noqa: E402
 
 def plot(sig: pd.DataFrame, out: pathlib.Path, title: str) -> None:
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.plot(sig["seconds"], sig["ann_vol_pct"], "o-", lw=1.5, ms=5)
+    ax.errorbar(sig["seconds"], sig["ann_vol_pct"], yerr=sig["ann_vol_se"],
+                fmt="o-", lw=1.5, ms=5, capsize=3, elinewidth=1)
     ax.axvline(300, ls="--", lw=1, color="grey")
     ax.annotate("5 min", xy=(300, ax.get_ylim()[0]), xytext=(320, ax.get_ylim()[0]),
                 fontsize=9, color="grey", va="bottom")
@@ -44,8 +45,11 @@ def main() -> None:
     sig = signature(ticks, args.price)
     print(sig.to_string(index=False))
 
-    ratio = sig["mean_RV"].iloc[0] / sig.loc[sig["freq"] == "5min", "mean_RV"].iloc[0]
-    print(f"\nRV(5s) / RV(5min) = {ratio:.2f}"
+    finest = sig.iloc[0]
+    five_min = sig.loc[sig["freq"] == "5min"].iloc[0]
+    ratio = finest["mean_RV"] / five_min["mean_RV"]
+    print(f"\nsessions used: {int(five_min['n_days'])}")
+    print(f"RV({finest['freq']}) / RV(5min) = {ratio:.2f}"
           "  — how far noise inflates the estimate at tick scale")
 
     out = pathlib.Path(args.out)
