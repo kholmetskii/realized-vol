@@ -10,6 +10,7 @@ import pytest
 
 from rvol.estimators.signature import (
     full_sessions,
+    noise_test,
     signature,
     trading_day,
 )
@@ -106,3 +107,66 @@ def test_partial_days_do_not_drag_the_average_down():
 
     assert with_stub["n_days"].iloc[0] == full["n_days"].iloc[0]
     assert abs(with_stub["mean_RV"].iloc[0] / full["mean_RV"].iloc[0] - 1) < 1e-9
+
+
+@pytest.mark.slow
+def test_noise_test_finds_nothing_when_there_is_no_noise():
+    df = build_paths()
+    df["mid"] = df["true"]
+    result = noise_test(df, fine="1s", coarse="5min")
+
+    assert result.p_value > 0.05, f"false positive: {result}"
+    assert abs(result.mean_ratio - 1.0) < 0.05
+    assert result.implied_noise_bps < 0.05
+
+
+@pytest.mark.slow
+def test_noise_test_detects_noise_and_recovers_its_size():
+    """With known noise sd, the implied figure should come back close to it."""
+    omega = 1e-4                      # 1 bp per observation
+    rng = np.random.default_rng(3)
+    df = build_paths()
+    df["mid"] = df["true"] * np.exp(rng.normal(0, omega, len(df)))
+    result = noise_test(df, fine="1s", coarse="5min")
+
+    assert result.p_value < 1e-6, f"noise should be obvious: {result}"
+    assert result.mean_ratio > 2
+    assert 0.8 < result.implied_noise_bps / (omega * 1e4) < 1.2
+
+
+def build_paths_varying_vol(seed: int = 4) -> pd.DataFrame:
+    """As build_paths, but each session gets its own volatility level.
+
+    Real volatility clusters: a calm week and a turbulent one sit in the same
+    sample. That shared, day-level variation is what pairing removes.
+    """
+    rng = np.random.default_rng(seed)
+    dt_ = 1 / 252 / PER_DAY
+    n = N_DAYS * PER_DAY
+    start = pd.Timestamp("2024-01-15 21:00", tz="UTC")
+
+    per_day = SIGMA_ANN * np.exp(rng.normal(0, 0.5, N_DAYS))   # vol clustering
+    sd = np.repeat(per_day, PER_DAY) * np.sqrt(dt_)
+
+    log_p = np.log(1.10) + np.cumsum(rng.normal(0, 1, n) * sd)
+    ts = start + pd.to_timedelta(np.arange(n), unit="s")
+    return pd.DataFrame({"ts": ts, "true": np.exp(log_p)})
+
+
+@pytest.mark.slow
+def test_pairing_beats_comparing_two_averages():
+    """The paired test is the point: it cancels day-to-day volatility swings."""
+    rng = np.random.default_rng(5)
+    df = build_paths_varying_vol()
+    df["mid"] = df["true"] * np.exp(rng.normal(0, 2e-5, len(df)))
+
+    result = noise_test(df, fine="1s", coarse="5min")
+    sig = signature(df, freqs=["1s", "5min"])
+    unpaired_se = (sig["se"] / sig["mean_RV"]).max()
+
+    # Not a huge factor: the noise term is additive and the volatility level
+    # is not, so the ratio itself still varies across days — quiet days show a
+    # larger one. Pairing removes the common level, not that.
+    assert result.se_log_ratio < unpaired_se / 1.5, (
+        f"paired se {result.se_log_ratio:.4f} vs unpaired {unpaired_se:.4f}"
+    )
