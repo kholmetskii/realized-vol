@@ -23,8 +23,12 @@ from scipy import stats
 FREQS: list[str] = ["1s", "2s", "5s", "10s", "15s", "30s", "1min", "2min",
                     "5min", "10min", "15min", "30min", "60min"]
 
-#: The session boundary, in hours UTC: 21:00 is 17:00 New York.
-SESSION_CLOSE_HOUR = 21
+#: The session boundary: 17:00 in New York, the FX market convention.
+SESSION_CLOSE_HOUR = 17
+
+#: The zone that boundary is fixed in. It must follow US daylight saving —
+#: 17:00 New York is 22:00 UTC in winter and 21:00 UTC in summer.
+SESSION_TZ = "America/New_York"
 
 #: A session shorter than this is a holiday or a half-open Sunday, not a day.
 MIN_SESSION_HOURS = 12.0
@@ -34,25 +38,61 @@ def freq_seconds(freq: str) -> float:
     return pd.Timedelta(freq).total_seconds()
 
 
-def trading_day(ts: pd.DatetimeIndex, close_hour: int = SESSION_CLOSE_HOUR
-                ) -> pd.DatetimeIndex:
+def trading_day(ts: pd.DatetimeIndex, close_hour: int = SESSION_CLOSE_HOUR,
+                tz: str = SESSION_TZ) -> pd.DatetimeIndex:
     """Label each timestamp with the trading day it belongs to.
 
-    A session runs from `close_hour` UTC to `close_hour` UTC and is named after
-    the calendar date it ends on, so Sunday 22:00 and Monday 14:00 share the
-    label Monday.
+    A session runs from `close_hour` to `close_hour` in `tz` and is named after
+    the local date it ends on, so Sunday evening and Monday afternoon share the
+    label Monday. Fixing the boundary in UTC instead would put it an hour out
+    for half the year, since New York moves and UTC does not.
     """
-    shifted = ts + pd.Timedelta(hours=24 - close_hour)
-    return shifted.normalize().tz_localize(None)
+    idx = ts.tz_localize("UTC") if ts.tz is None else ts
+    shifted = idx.tz_convert(tz) + pd.Timedelta(hours=24 - close_hour)
+    return pd.DatetimeIndex(shifted.normalize().tz_localize(None))
 
 
-def realized_variance(prices: pd.Series, freq: str) -> float:
-    """RV for one day using last-tick sampling at step `freq`."""
-    p = prices.resample(freq).last().dropna()
+def realized_variance(prices: pd.Series, freq: str,
+                      origin: pd.Timestamp | str = "start_day") -> float:
+    """RV for one day using last-tick sampling at step `freq`.
+
+    `origin` anchors the sampling grid. Moving it shifts every bin boundary,
+    which changes the answer — see `subsampled_variance`.
+    """
+    p = prices.resample(freq, origin=origin).last().dropna()
     if len(p) < 3:
         return np.nan
     r = np.diff(np.log(p.to_numpy()))
     return float(np.sum(r**2))
+
+
+def grid_origins(prices: pd.Series, freq: str, n_grids: int) -> list[pd.Timestamp]:
+    """`n_grids` equally spaced anchors covering one sampling interval."""
+    step = pd.Timedelta(freq)
+    base = prices.index[0].normalize()
+    return [base + step * k / n_grids for k in range(n_grids)]
+
+
+def subsampled_variance(prices: pd.Series, freq: str, n_grids: int = 12
+                        ) -> float:
+    """RV averaged over every shift of the sampling grid.
+
+    One grid throws away all the ticks that fall inside its bins, and which
+    ticks those are is arbitrary: on EURUSD, sliding a five-minute grid across
+    its own width moves a single session's RV by tens of percent. Averaging
+    over the shifts uses the whole sample and cuts that arbitrariness, at no
+    cost in bias — each grid is itself an unbiased estimate.
+
+    This is the RV_avg of Zhang, Mykland and Ait-Sahalia (2005); it still
+    carries the noise bias of the underlying RV, which the two-scale estimator
+    removes by combining RV_avg with the tick-level RV.
+    """
+    values = [
+        realized_variance(prices, freq, origin=o)
+        for o in grid_origins(prices, freq, n_grids)
+    ]
+    values = [v for v in values if not np.isnan(v)]
+    return float(np.mean(values)) if values else np.nan
 
 
 def sessions(s: pd.Series) -> pd.Series:

@@ -10,8 +10,11 @@ import pytest
 
 from rvol.estimators.signature import (
     full_sessions,
+    grid_origins,
     noise_test,
+    realized_variance,
     signature,
+    subsampled_variance,
     trading_day,
 )
 
@@ -72,22 +75,42 @@ def test_five_minute_estimate_recovers_true_volatility():
 
 
 def test_trading_day_labels_sunday_evening_as_monday():
-    """A session runs 21:00 UTC to 21:00 UTC and is named after the day it ends."""
+    """A session ends at 17:00 New York and is named after the day it ends."""
     ts = pd.DatetimeIndex([
-        pd.Timestamp("2024-01-14 22:30", tz="UTC"),   # Sunday, after the open
+        pd.Timestamp("2024-01-14 23:30", tz="UTC"),   # Sunday, after the open
         pd.Timestamp("2024-01-15 14:00", tz="UTC"),   # Monday, London afternoon
-        pd.Timestamp("2024-01-15 20:59", tz="UTC"),   # Monday, just before close
-        pd.Timestamp("2024-01-15 21:30", tz="UTC"),   # already Tuesday's session
+        pd.Timestamp("2024-01-15 21:59", tz="UTC"),   # Monday, just before close
+        pd.Timestamp("2024-01-15 22:30", tz="UTC"),   # already Tuesday's session
     ])
     labels = trading_day(ts)
     assert list(labels[:3]) == [pd.Timestamp("2024-01-15")] * 3
     assert labels[3] == pd.Timestamp("2024-01-16")
 
 
+def test_session_boundary_follows_new_york_daylight_saving():
+    """17:00 New York is 22:00 UTC in winter and 21:00 UTC in summer.
+
+    A boundary pinned to a fixed UTC hour would be an hour out for half the
+    year, cutting one session short and stretching its neighbour.
+    """
+    winter = pd.Timestamp("2024-01-10 21:30", tz="UTC")   # 16:30 New York, EST
+    summer = pd.Timestamp("2024-03-13 21:30", tz="UTC")   # 17:30 New York, EDT
+
+    assert trading_day(pd.DatetimeIndex([winter]))[0] == pd.Timestamp("2024-01-10")
+    assert trading_day(pd.DatetimeIndex([summer]))[0] == pd.Timestamp("2024-03-14")
+
+
+def test_naive_timestamps_are_read_as_utc():
+    naive = pd.DatetimeIndex([pd.Timestamp("2024-01-15 14:00")])
+    aware = pd.DatetimeIndex([pd.Timestamp("2024-01-15 14:00", tz="UTC")])
+    assert trading_day(naive)[0] == trading_day(aware)[0]
+
+
 def test_short_sessions_are_dropped():
     """A two-hour Sunday is not a day; keeping it would bias every average."""
-    full = pd.date_range("2024-01-15 21:00", periods=24, freq="1h", tz="UTC")
-    short = pd.date_range("2024-01-19 21:00", periods=2, freq="1h", tz="UTC")
+    # 22:00 UTC is the winter open: 17:00 New York.
+    full = pd.date_range("2024-01-15 22:00", periods=24, freq="1h", tz="UTC")
+    short = pd.date_range("2024-01-19 22:00", periods=2, freq="1h", tz="UTC")
     s = pd.Series(1.0, index=full.append(short))
 
     kept = full_sessions(s)
@@ -170,3 +193,44 @@ def test_pairing_beats_comparing_two_averages():
     assert result.se_log_ratio < unpaired_se / 1.5, (
         f"paired se {result.se_log_ratio:.4f} vs unpaired {unpaired_se:.4f}"
     )
+
+
+def test_grid_offsets_cover_one_interval_exactly():
+    prices = pd.Series(
+        1.0, index=pd.date_range("2024-01-15 22:00", periods=10, freq="1min", tz="UTC")
+    )
+    origins = grid_origins(prices, "5min", n_grids=5)
+    assert len(origins) == 5
+    gaps = {(b - a) for a, b in zip(origins[:-1], origins[1:], strict=True)}
+    assert gaps == {pd.Timedelta(seconds=60)}
+
+
+@pytest.mark.slow
+def test_subsampling_lies_inside_the_spread_of_single_grids():
+    """It is the average of the grids, so it can never be an outlier."""
+    df = build_paths()
+    s = df.set_index("ts")["true"]
+
+    singles = [
+        realized_variance(s, "5min", origin=o)
+        for o in grid_origins(s, "5min", n_grids=12)
+    ]
+    avg = subsampled_variance(s, "5min", n_grids=12)
+
+    assert min(singles) <= avg <= max(singles)
+    assert abs(avg / np.mean(singles) - 1) < 1e-12
+    assert max(singles) / min(singles) > 1.02, "grids should disagree at all"
+
+
+@pytest.mark.slow
+def test_subsampling_is_more_stable_than_one_grid():
+    """Same paths, ten seeds: averaging the grids should scatter less."""
+    single, avg = [], []
+    for seed in range(10):
+        s = build_paths(seed).set_index("ts")["true"]
+        single.append(realized_variance(s, "5min"))
+        avg.append(subsampled_variance(s, "5min", n_grids=12))
+
+    single_cv = np.std(single, ddof=1) / np.mean(single)
+    avg_cv = np.std(avg, ddof=1) / np.mean(avg)
+    assert avg_cv < single_cv, f"single {single_cv:.4f} vs averaged {avg_cv:.4f}"
