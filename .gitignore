@@ -5,9 +5,12 @@
 *.csv
 
 # outputs
-figures/
-*.png
+figures/**
 outputs/
+*.png
+
+# ... except the figures the README shows
+!figures/*.png
 
 # python
 __pycache__/
