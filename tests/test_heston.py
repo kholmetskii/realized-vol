@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from rvol.simulation.heston import add_microstructure_noise, simulate_heston
+from rvol.simulation.heston import simulate_heston
+from rvol.simulation.noise import add_iid_log_noise
 
 
 def test_integrated_variance_matches_realized_variance_without_noise():
@@ -20,7 +21,7 @@ def test_noise_inflates_realized_variance():
     rng = np.random.default_rng(1)
     n, dt = 50_000, 1 / 252 / 50_000
     prices, _, iv = simulate_heston(n, dt, rng=rng)
-    noisy = add_microstructure_noise(prices, noise_sd=1e-4, rng=rng)
+    noisy = add_iid_log_noise(prices, noise_sd=1e-4, rng=rng)
 
     rv_noisy = float(np.sum(np.diff(np.log(noisy)) ** 2))
     assert rv_noisy > 2 * iv

@@ -9,16 +9,17 @@ How predictable is daily volatility, and can competing models be told apart
 statistically — given that the target itself is unobservable and is estimated
 with error?
 
-## Layout
+## Current layout
 
     src/rvol/data/         tick data download and parsing
-    src/rvol/estimators/   RV, subsampled RV, two-scale RV, realized kernel,
-                           bipower variation, jump test
-    src/rvol/models/       HAR, HARQ, GARCH, Markov-switching
-    src/rvol/evaluation/   loss functions, Diebold-Mariano, bootstrap, MCS
-    src/rvol/simulation/   generators with known true volatility
+    src/rvol/estimators/   RV, subsampled RV, volatility signatures
+    src/rvol/simulation/   latent-price simulation, observation noise,
+                           Monte Carlo validation
     scripts/               reproducible entry points
     tests/                 checks against synthetic data with a known answer
+
+Forecasting models, forecast evaluation, and additional noise- and jump-robust
+estimators are planned but not yet implemented; see `PROJECT_PLAN.md`.
 
 ## Install
 
@@ -30,9 +31,9 @@ with error?
 ### 1. How far can you sample before noise takes over?
 
 Sample: EURUSD tick quotes from Dukascopy, 1 January to 31 March 2024 —
-5,359,908 ticks over 64 trading sessions, each running 21:00 to 21:00 UTC
-(17:00 New York, daylight saving included). Median quoted spread 0.19 bps, no
-crossed quotes.
+5,359,908 ticks over 64 trading sessions, each ending at 17:00 New York
+(22:00 UTC in winter and 21:00 UTC in summer). Median quoted spread 0.19 bps,
+no crossed quotes.
 
 Realized variance is computed per session at sampling intervals from 1 second
 to 1 hour, then averaged across sessions and annualised.

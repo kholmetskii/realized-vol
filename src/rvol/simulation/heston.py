@@ -1,7 +1,8 @@
-"""Heston paths with known integrated variance.
+"""Efficient Heston price paths with known integrated variance.
 
 These exist for verification: every estimator is checked against a quantity we
-know exactly before it is ever applied to real data.
+know exactly before it is ever applied to real data. Observation noise is kept
+separate in :mod:`rvol.simulation.noise` so the latent path is never ambiguous.
 """
 
 from __future__ import annotations
@@ -41,11 +42,3 @@ def simulate_heston(
 
     integrated_var = float(np.sum(v[:-1]) * dt)
     return np.exp(log_s), v, integrated_var
-
-
-def add_microstructure_noise(
-    prices: np.ndarray, noise_sd: float, rng: np.random.Generator | None = None
-) -> np.ndarray:
-    """Additive noise in logs — the simplest model of bid-ask bounce."""
-    rng = rng or np.random.default_rng()
-    return prices * np.exp(rng.normal(0.0, noise_sd, size=prices.shape))
