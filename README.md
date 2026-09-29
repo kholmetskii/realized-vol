@@ -11,15 +11,45 @@ with error?
 
 ## Current layout
 
-    src/rvol/data/         tick data download and parsing
-    src/rvol/estimators/   RV, subsampled RV, volatility signatures
-    src/rvol/simulation/   latent-price simulation, observation noise,
-                           Monte Carlo validation
+    src/rvol/data/         external data download and parsing
+    src/rvol/market/       FX sessions and timestamp sampling rules
+    src/rvol/estimators/   pure numerical variance estimators
+    src/rvol/features/     daily features built from market data and estimators
+    src/rvol/diagnostics/  volatility signatures and microstructure tests
+    src/rvol/plotting/     static research figures
+    src/rvol/simulation/   latent prices, observation noise, Monte Carlo checks
+    src/rvol/models/       volatility forecasting models (planned)
+    src/rvol/evaluation/   forecast comparison (planned)
     scripts/               reproducible entry points
     tests/                 checks against synthetic data with a known answer
 
 Forecasting models, forecast evaluation, and additional noise- and jump-robust
-estimators are planned but not yet implemented; see `PROJECT_PLAN.md`.
+estimators are not yet implemented.
+
+Dependency direction is one-way:
+
+    data ───────┐
+                v
+    market + estimators → features → diagnostics / models → evaluation
+                ^
+    simulation ─┘
+
+`estimators` contains no pandas, timestamps, FX conventions, or reporting.
+`market` contains no variance formulas. `features` is the adapter that combines
+the two, while higher layers consume the resulting daily quantities.
+
+## Reproduce the plots
+
+    python scripts/sampling_plot.py
+    python scripts/heston_plot.py
+    python scripts/simulation_plots.py
+    python scripts/diagnostics_plots.py \
+        data/EURUSD_2024-01-01_2024-03-31.parquet
+
+The scripts write `figures/sampling_grids.png`, `figures/heston_simulation.png`,
+`figures/simulation_overview.png`, and `figures/diagnostics_overview.png`.
+Use `scripts/signature_plot.py` when only one mid, bid, or ask signature is
+needed.
 
 ## Install
 
@@ -56,7 +86,8 @@ slope the theory predicts:
 Comparing two averages is weak here, because a volatile week raises the
 estimate at every frequency at once, and that shared variation dominates the
 standard errors. Pairing — one ratio RV(1s)/RV(5min) per session, then a
-one-sided t-test on the log ratios — removes it (`rvol.estimators.signature.noise_test`):
+one-sided t-test on the log ratios — removes it
+(`rvol.diagnostics.microstructure.noise_test`):
 
 | price | RV(1s)/RV(5min) | t | p | implied noise sd |
 |---|---|---|---|---|

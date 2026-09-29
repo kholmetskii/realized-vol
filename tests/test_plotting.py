@@ -1,0 +1,109 @@
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from rvol.diagnostics.microstructure import NoiseTest  # noqa: E402
+from rvol.plotting.diagnostics import (  # noqa: E402
+    plot_diagnostics_overview,
+    plot_volatility_signature,
+)
+from rvol.plotting.sampling import plot_sampling_grids  # noqa: E402
+from rvol.plotting.simulation import (  # noqa: E402
+    plot_heston_path,
+    plot_simulation_overview,
+)
+from rvol.simulation.monte_carlo import MonteCarloSummary  # noqa: E402
+
+
+def sample_signature(scale: float = 1.0) -> pd.DataFrame:
+    return pd.DataFrame({
+        "seconds": [1.0, 60.0, 300.0],
+        "ann_vol_pct": np.array([6.0, 5.8, 5.6]) * scale,
+        "ann_vol_se": [0.2, 0.2, 0.25],
+    })
+
+
+def sample_noise(ratio: float) -> NoiseTest:
+    return NoiseTest(
+        fine="1s",
+        coarse="5min",
+        n_days=20,
+        mean_ratio=ratio,
+        se_log_ratio=0.02,
+        t_stat=3.0,
+        p_value=0.003,
+        implied_noise_bps=0.04,
+    )
+
+
+def sample_summary(name: str, bias: float, rmse: float) -> MonteCarloSummary:
+    return MonteCarloSummary(
+        estimator=name,
+        n_replications=20,
+        mean_estimate=0.01 + bias,
+        mean_target=0.01,
+        bias=bias,
+        bias_se=0.001,
+        rmse=rmse,
+    )
+
+
+def test_diagnostic_plots_build_expected_panels():
+    signatures = {
+        "mid": sample_signature(),
+        "bid": sample_signature(1.02),
+    }
+    single = plot_volatility_signature(signatures)
+    overview = plot_diagnostics_overview(
+        signatures,
+        {"mid": sample_noise(1.08), "bid": sample_noise(1.18)},
+    )
+
+    assert len(single.axes) == 1
+    assert len(overview.axes) == 2
+    plt.close(single)
+    plt.close(overview)
+
+
+def test_sampling_plot_builds_path_and_grid_panels():
+    prices = 100 * np.exp(np.cumsum(np.r_[0.0, np.full(39, 0.001)]))
+    figure = plot_sampling_grids(prices, step=4)
+
+    assert len(figure.axes) == 2
+    plt.close(figure)
+
+
+def test_simulation_plot_builds_four_panels():
+    prices = np.linspace(100.0, 101.0, 50)
+    scenarios = {
+        "Clean": (
+            sample_summary("Naive RV", 0.0, 0.001),
+            sample_summary("Subsampled RV", 0.0001, 0.0015),
+        ),
+        "Noisy": (
+            sample_summary("Naive RV", 0.005, 0.006),
+            sample_summary("Subsampled RV", 0.0002, 0.0016),
+        ),
+    }
+    figure = plot_simulation_overview(
+        prices,
+        prices * 1.0001,
+        np.linspace(0.03, 0.05, 50),
+        scenarios,
+    )
+
+    assert len(figure.axes) == 4
+    plt.close(figure)
+
+
+def test_heston_plot_builds_price_variance_and_integrated_variance_panels():
+    prices = np.linspace(100.0, 101.0, 50)
+    variance = np.linspace(0.03, 0.05, 50)
+    figure = plot_heston_path(prices, variance, dt=1 / 252 / 49, theta=0.04)
+
+    assert len(figure.axes) == 3
+    plt.close(figure)
