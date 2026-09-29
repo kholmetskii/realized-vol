@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TypeAlias
+
 import pandas as pd
 
-SamplingOrigin = pd.Timestamp | str
+SamplingOrigin: TypeAlias = pd.Timestamp | str
 
 
 def last_tick_sample(
