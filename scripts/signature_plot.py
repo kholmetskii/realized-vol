@@ -14,24 +14,8 @@ matplotlib.use("Agg")  # headless: write PNGs without a display
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from rvol.estimators.signature import signature  # noqa: E402
-
-
-def plot(sig: pd.DataFrame, out: pathlib.Path, title: str) -> None:
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.errorbar(sig["seconds"], sig["ann_vol_pct"], yerr=sig["ann_vol_se"],
-                fmt="o-", lw=1.5, ms=5, capsize=3, elinewidth=1)
-    ax.axvline(300, ls="--", lw=1, color="grey")
-    ax.annotate("5 min", xy=(300, ax.get_ylim()[0]), xytext=(320, ax.get_ylim()[0]),
-                fontsize=9, color="grey", va="bottom")
-    ax.set_xscale("log")
-    ax.set_xlabel("sampling interval, s (log scale)")
-    ax.set_ylabel("annualised volatility from RV, %")
-    ax.set_title(title)
-    ax.grid(alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(out, dpi=150)
-    print(f"figure: {out}")
+from rvol.diagnostics.signature import signature  # noqa: E402
+from rvol.plotting.diagnostics import plot_volatility_signature  # noqa: E402
 
 
 def main() -> None:
@@ -54,7 +38,13 @@ def main() -> None:
 
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    plot(sig, out, f"Volatility signature plot — {pathlib.Path(args.parquet).stem}")
+    figure = plot_volatility_signature(
+        {args.price: sig},
+        title=f"Volatility signature — {pathlib.Path(args.parquet).stem}",
+    )
+    figure.savefig(out, dpi=150)
+    plt.close(figure)
+    print(f"figure: {out}")
 
 
 if __name__ == "__main__":

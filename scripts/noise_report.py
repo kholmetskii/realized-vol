@@ -9,7 +9,7 @@ import pathlib
 
 import pandas as pd
 
-from rvol.estimators.signature import noise_test
+from rvol.diagnostics.microstructure import noise_test
 
 
 def main() -> None:

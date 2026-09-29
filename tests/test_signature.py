@@ -8,15 +8,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.estimators.signature import (
-    full_sessions,
-    grid_origins,
-    noise_test,
-    realized_variance,
-    signature,
-    subsampled_variance,
-    trading_day,
+from rvol.diagnostics.microstructure import noise_test
+from rvol.diagnostics.signature import signature
+from rvol.features.realized import (
+    sampled_realized_variance,
+    subsampled_realized_variance,
 )
+from rvol.market.sampling import grid_origins
+from rvol.market.sessions import full_sessions, trading_day
 
 SIGMA_ANN = 0.10
 N_DAYS = 20
@@ -212,10 +211,10 @@ def test_subsampling_lies_inside_the_spread_of_single_grids():
     s = df.set_index("ts")["true"]
 
     singles = [
-        realized_variance(s, "5min", origin=o)
+        sampled_realized_variance(s, "5min", origin=o)
         for o in grid_origins(s, "5min", n_grids=12)
     ]
-    avg = subsampled_variance(s, "5min", n_grids=12)
+    avg = subsampled_realized_variance(s, "5min", n_grids=12)
 
     assert min(singles) <= avg <= max(singles)
     assert abs(avg / np.mean(singles) - 1) < 1e-12
@@ -228,8 +227,8 @@ def test_subsampling_is_more_stable_than_one_grid():
     single, avg = [], []
     for seed in range(10):
         s = build_paths(seed).set_index("ts")["true"]
-        single.append(realized_variance(s, "5min"))
-        avg.append(subsampled_variance(s, "5min", n_grids=12))
+        single.append(sampled_realized_variance(s, "5min"))
+        avg.append(subsampled_realized_variance(s, "5min", n_grids=12))
 
     single_cv = np.std(single, ddof=1) / np.mean(single)
     avg_cv = np.std(avg, ddof=1) / np.mean(avg)
