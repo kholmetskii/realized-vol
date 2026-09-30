@@ -71,6 +71,11 @@ timestamps and session dates, and writes the output atomically. The result has
 one row per complete session with the session date, realised variance, log
 realised variance, and the number of sampled observations.
 
+`rvol.features.forecasting.build_har_features` converts that daily table into
+one-session-ahead HAR-RV rows. Each row records its forecast origin and target
+dates explicitly, using the current session, latest five sessions, and latest
+22 sessions as predictors of the following session's log realised variance.
+
 ## Install
 
     python -m venv .venv && source .venv/bin/activate
