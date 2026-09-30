@@ -41,12 +41,18 @@ the two, while higher layers consume the resulting daily quantities.
 ## Reproduce the plots
 
     python scripts/sampling_plot.py
+    python scripts/returns_and_rv_plot.py
+    python scripts/cumulative_iv_vs_rv_plot.py
+    python scripts/bid_ask_bounce_plot.py
+    python scripts/daily_rv_plot.py
     python scripts/heston_plot.py
     python scripts/simulation_plots.py
     python scripts/diagnostics_plots.py \
         data/EURUSD_2024-01-01_2024-03-31.parquet
 
-The scripts write `figures/sampling_grids.png`, `figures/heston_simulation.png`,
+The scripts write `figures/sampling_grids.png`, `figures/returns_and_rv.png`,
+`figures/cumulative_iv_vs_rv.png`, `figures/bid_ask_bounce.png`,
+`figures/daily_rv.png`, `figures/heston_simulation.png`,
 `figures/simulation_overview.png`, and `figures/diagnostics_overview.png`.
 Use `scripts/signature_plot.py` when only one mid, bid, or ask signature is
 needed.

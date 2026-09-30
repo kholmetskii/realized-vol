@@ -7,9 +7,15 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from rvol.diagnostics.microstructure import NoiseTest  # noqa: E402
+from rvol.plotting.daily import plot_daily_realized_variance  # noqa: E402
 from rvol.plotting.diagnostics import (  # noqa: E402
     plot_diagnostics_overview,
     plot_volatility_signature,
+)
+from rvol.plotting.microstructure import plot_bid_ask_bounce  # noqa: E402
+from rvol.plotting.returns import (  # noqa: E402
+    plot_cumulative_iv_vs_rv,
+    plot_returns_and_rv,
 )
 from rvol.plotting.sampling import plot_sampling_grids  # noqa: E402
 from rvol.plotting.simulation import (  # noqa: E402
@@ -72,6 +78,44 @@ def test_diagnostic_plots_build_expected_panels():
 def test_sampling_plot_builds_path_and_grid_panels():
     prices = 100 * np.exp(np.cumsum(np.r_[0.0, np.full(39, 0.001)]))
     figure = plot_sampling_grids(prices, step=4)
+
+    assert len(figure.axes) == 2
+    plt.close(figure)
+
+
+def test_returns_plot_builds_four_transformation_panels():
+    prices = 100 * np.exp(np.cumsum(np.r_[0.0, np.full(39, 0.001)]))
+    figure = plot_returns_and_rv(prices)
+
+    assert len(figure.axes) == 4
+    plt.close(figure)
+
+
+def test_cumulative_iv_vs_rv_plot_builds_comparison_and_error_panels():
+    prices = 100 * np.exp(np.cumsum(np.r_[0.0, np.full(39, 0.001)]))
+    variance = np.full(40, 0.04)
+    figure = plot_cumulative_iv_vs_rv(prices, variance, dt=1 / 252 / 39)
+
+    assert len(figure.axes) == 2
+    plt.close(figure)
+
+
+def test_bid_ask_bounce_plot_builds_quotes_trades_and_returns_panels():
+    efficient = np.linspace(100.0, 100.1, 40)
+    bid = efficient * np.exp(-0.0002)
+    ask = efficient * np.exp(0.0002)
+    mid = 0.5 * (bid + ask)
+    trades = np.where(np.arange(40) % 2 == 0, bid, ask)
+    figure = plot_bid_ask_bounce(efficient, bid, ask, mid, trades)
+
+    assert len(figure.axes) == 3
+    plt.close(figure)
+
+
+def test_daily_rv_plot_builds_price_and_variance_panels():
+    closes = np.linspace(100.0, 102.0, 40)
+    daily_rv = np.linspace(0.0001, 0.0003, 40)
+    figure = plot_daily_realized_variance(closes, daily_rv, rolling_window=10)
 
     assert len(figure.axes) == 2
     plt.close(figure)
