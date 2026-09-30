@@ -57,6 +57,20 @@ The scripts write `figures/sampling_grids.png`, `figures/returns_and_rv.png`,
 Use `scripts/signature_plot.py` when only one mid, bid, or ask signature is
 needed.
 
+## Build the daily dataset
+
+Keep downloaded tick data in separate chunks, then combine them into a compact
+daily realised-variance dataset without loading every chunk at once:
+
+    python scripts/build_daily_dataset.py "data/EURUSD_*.parquet" \
+        --frequency 5min \
+        --out data/derived/EURUSD_daily_rv_5min.parquet
+
+The builder carries FX sessions across file boundaries, removes overlapping
+timestamps and session dates, and writes the output atomically. The result has
+one row per complete session with the session date, realised variance, log
+realised variance, and the number of sampled observations.
+
 ## Install
 
     python -m venv .venv && source .venv/bin/activate
