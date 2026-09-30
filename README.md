@@ -18,13 +18,13 @@ with error?
     src/rvol/diagnostics/  volatility signatures and microstructure tests
     src/rvol/plotting/     static research figures
     src/rvol/simulation/   latent prices, observation noise, Monte Carlo checks
-    src/rvol/models/       volatility forecasting models (planned)
-    src/rvol/evaluation/   forecast comparison (planned)
+    src/rvol/models/       volatility forecasting models
+    src/rvol/evaluation/   walk-forward forecasts and model comparison
     scripts/               reproducible entry points
     tests/                 checks against synthetic data with a known answer
 
-Forecasting models, forecast evaluation, and additional noise- and jump-robust
-estimators are not yet implemented.
+Forecast loss comparison and additional noise- and jump-robust estimators are
+not yet implemented.
 
 Dependency direction is one-way:
 
@@ -75,6 +75,11 @@ realised variance, and the number of sampled observations.
 one-session-ahead HAR-RV rows. Each row records its forecast origin and target
 dates explicitly, using the current session, latest five sessions, and latest
 22 sessions as predictors of the following session's log realised variance.
+
+`rvol.evaluation.walk_forward.walk_forward_forecasts` compares a naïve
+"tomorrow equals today" forecast with an expanding-window HAR-RV regression.
+Training outcomes are admitted only after their target dates have become
+observable, preventing future information from leaking into a forecast.
 
 ## Install
 
