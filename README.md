@@ -23,8 +23,7 @@ with error?
     scripts/               reproducible entry points
     tests/                 checks against synthetic data with a known answer
 
-Forecast loss comparison and additional noise- and jump-robust estimators are
-not yet implemented.
+Additional noise- and jump-robust estimators are not yet implemented.
 
 Dependency direction is one-way:
 
@@ -80,6 +79,17 @@ dates explicitly, using the current session, latest five sessions, and latest
 "tomorrow equals today" forecast with an expanding-window HAR-RV regression.
 Training outcomes are admitted only after their target dates have become
 observable, preventing future information from leaking into a forecast.
+
+Run the complete out-of-sample comparison with:
+
+    python scripts/evaluate_forecasts.py \
+        data/derived/EURUSD_daily_rv_5min.parquet \
+        --forecast-start 2023-01-01
+
+The report shows mean QLIKE and log-RV squared loss for both models, followed
+by a one-sided Diebold-Mariano test of whether HAR has lower expected loss. The
+test uses a Newey-West long-run variance estimate for serially correlated loss
+differences; a positive difference favours HAR.
 
 ## Install
 
