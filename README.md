@@ -1,5 +1,7 @@
 # Realized Volatility
 
+[![CI](https://github.com/kholmetskii/realized-vol/actions/workflows/ci.yml/badge.svg)](https://github.com/kholmetskii/realized-vol/actions/workflows/ci.yml)
+
 Estimating realized volatility from intraday data, forecasting it, and comparing
 the forecasts with proper statistical tests.
 
