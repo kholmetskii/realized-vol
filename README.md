@@ -221,22 +221,55 @@ correct on EURUSD mid quotes, which is a statement about this market rather
 than about the estimators; they are validated against simulated paths with
 known answers instead.
 
-### 3. Forecasting status
+### 3. HAR-RV improves out-of-sample forecasts
 
-The full forecasting pipeline is implemented and leakage-tested. It compares
-historical-mean, naïve persistence, AR(1), and HAR-RV forecasts on the same
-expanding windows using QLIKE and log-RV MSE, then applies one-sided
-Diebold-Mariano tests with a Newey-West variance estimate. Numerical forecast
-conclusions remain provisional until the expanded historical dataset has
-finished downloading and the final evaluation window is frozen.
+The forecasting sample contains **323 complete EUR/USD sessions** from 2
+January 2023 to 29 March 2024. The experiment uses 2023 as the initial history
+and freezes Q1 2024 as the evaluation period: 64 one-session-ahead forecasts
+from 2 January to 29 March. After the 22-session feature warm-up, the first
+forecast has 237 eligible training rows. Each later forecast uses an expanding
+window and admits an outcome only after its target session has ended.
+
+Four fixed specifications are compared: the historical mean, naïve persistence,
+AR(1), and HAR-RV. No model was changed after examining the Q1 results.
+
+| model | mean QLIKE | reduction vs naïve | mean log-RV MSE | reduction vs naïve |
+|---|---:|---:|---:|---:|
+| historical mean | 0.2267 | 13.3% | 0.5796 | -28.1% |
+| naïve | 0.2616 | — | 0.4525 | — |
+| AR(1) | 0.1801 | 31.2% | 0.4120 | 8.9% |
+| **HAR-RV** | **0.1400** | **46.5%** | **0.2607** | **42.4%** |
+
+Negative reduction means worse performance than naïve. HAR-RV has the lowest
+mean loss under both metrics. Relative to each benchmark:
+
+| HAR-RV compared with | QLIKE reduction | DM | one-sided p | log-MSE reduction | DM | one-sided p |
+|---|---:|---:|---:|---:|---:|---:|
+| naïve | 46.5% | 3.297 | 0.00049 | 42.4% | 3.150 | 0.00082 |
+| AR(1) | 22.3% | 2.564 | 0.00517 | 36.7% | 4.071 | 2.34e-05 |
+| historical mean | 38.3% | 2.555 | 0.00531 | 55.0% | 3.607 | 0.00016 |
+
+The loss differential is benchmark loss minus HAR loss, so positive DM
+statistics favour HAR. The main table uses three Newey–West lags, selected by
+the sample-size rule in the evaluator. Every comparison remains significant at
+5% when the lag choice is varied from zero through five.
 
 ![Out-of-sample forecast evaluation](figures/forecast_evaluation.png)
 
+The advantage is meaningful but not uniform. HAR beats AR(1) and the
+historical mean on 48 of 64 sessions (75%), but beats naïve on only 33 sessions
+(51.6%). Its large average improvement over naïve comes from avoiding several
+costly misses rather than winning almost every day. HAR is best under both
+losses in February and March; in January the historical mean narrowly leads
+under QLIKE (0.0940 against 0.0968), while HAR still leads under log-RV MSE.
+
 ## Limitations
 
-- **One instrument, one quarter.** EURUSD in Q1 2024 was quiet, at roughly 5.6%
-  annualised. Nothing here shows the conclusions hold for a less liquid pair,
-  a turbulent period, or an asset class with wider spreads.
+- **One instrument and one out-of-sample quarter.** The dataset spans 15
+  months, but forecast evaluation contains only 64 Q1 2024 sessions. EUR/USD
+  was quiet, at roughly 5.6% annualised during that quarter. Nothing here shows
+  the conclusions hold for a turbulent regime, a less liquid pair, or another
+  asset class.
 - **The noise measurement is indirect.** The implied noise sd assumes the
   standard model — an efficient price plus i.i.d. noise — and inherits its
   bias if the noise is autocorrelated or dependent on the price. The numbers
@@ -248,7 +281,7 @@ finished downloading and the final evaluation window is frozen.
 - **Sessions are dropped, not adjusted.** Any session covering under 12 hours
   is excluded, which removes the Sunday-evening opens and holidays instead of
   modelling them.
-- **Forecast results are not final.** The out-of-sample machinery is complete,
-  but the expanded historical dataset is still being assembled. Current model
-  rankings use incomplete coverage and should not be presented as the final
-  empirical conclusion.
+- **The statistical tests are asymptotic.** Newey–West adjustment addresses
+  serial correlation in loss differences, but 64 forecasts remain a small
+  sample. The results support this fixed Q1 experiment, not universal HAR
+  superiority.
