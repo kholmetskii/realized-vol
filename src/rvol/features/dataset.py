@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
-import tempfile
 from collections.abc import Iterable
 
 import numpy as np
@@ -122,18 +120,7 @@ def build_daily_dataset(
 
 
 def write_daily_dataset(dataset: pd.DataFrame, destination: str | pathlib.Path) -> None:
-    """Atomically replace a derived Parquet dataset."""
-    output = pathlib.Path(destination)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{output.stem}-",
-        suffix=output.suffix or ".parquet",
-        dir=output.parent,
-    )
-    os.close(descriptor)
-    temporary = pathlib.Path(temporary_name)
-    try:
-        dataset.to_parquet(temporary, index=False)
-        temporary.replace(output)
-    finally:
-        temporary.unlink(missing_ok=True)
+    """Compatibility wrapper for the infrastructure persistence adapter."""
+    from rvol.infrastructure import ParquetDatasetRepository
+
+    ParquetDatasetRepository(destination).save(dataset)

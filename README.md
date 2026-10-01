@@ -9,8 +9,13 @@ How predictable is daily volatility, and can competing models be told apart
 statistically — given that the target itself is unobservable and is estimated
 with error?
 
-## Current layout
+## Architecture
 
+    src/rvol/domain/       immutable configuration, results, and protocols
+    src/rvol/application/  model-agnostic walk-forward use cases
+    src/rvol/models/       interchangeable volatility forecasting models
+    src/rvol/evaluation/   loss metrics and statistical model comparison
+    src/rvol/infrastructure/ Parquet persistence adapters
     src/rvol/data/         external data download and parsing
     src/rvol/market/       FX sessions and timestamp sampling rules
     src/rvol/estimators/   pure numerical variance estimators
@@ -18,24 +23,33 @@ with error?
     src/rvol/diagnostics/  volatility signatures and microstructure tests
     src/rvol/plotting/     static research figures
     src/rvol/simulation/   latent prices, observation noise, Monte Carlo checks
-    src/rvol/models/       volatility forecasting models
-    src/rvol/evaluation/   walk-forward forecasts and model comparison
-    scripts/               reproducible entry points
+    scripts/               composition roots and reproducible entry points
     tests/                 checks against synthetic data with a known answer
 
 Additional noise- and jump-robust estimators are not yet implemented.
 
-Dependency direction is one-way:
+The forecasting dependency direction points toward stable contracts:
 
-    data ───────┐
-                v
-    market + estimators → features → diagnostics / models → evaluation
-                ^
-    simulation ─┘
+    scripts (composition root)
+       ├── application ────────────┐
+       ├── models ─────────────────┤
+       ├── evaluation ─────────────┼──> domain
+       └── infrastructure ─────────┘
+
+The independent data-preparation pipeline is:
+
+    data + market + estimators ──> features ──> application
 
 `estimators` contains no pandas, timestamps, FX conventions, or reporting.
 `market` contains no variance formulas. `features` is the adapter that combines
-the two, while higher layers consume the resulting daily quantities.
+the two, while higher layers consume the resulting daily quantities. Forecast
+models implement the domain `Forecaster` protocol, and Parquet persistence
+implements `DatasetRepository`; neither is hard-coded into the experiment.
+
+To add a model, implement `name`, `feature_names`, and `fit`, then inject the
+new object into `WalkForwardExperiment`. The experiment and evaluator do not
+need model-specific branches. Tests enforce the dependency direction so an
+inner layer cannot accidentally import an outer adapter.
 
 ## Reproduce the plots
 
@@ -107,6 +121,12 @@ serially correlated loss differences; a positive difference favours HAR.
     python -m venv .venv && source .venv/bin/activate
     pip install -e ".[dev]"
 
+Run the offline quality checks with:
+
+    pytest -m "not slow"
+    ruff check src tests scripts
+    mypy src tests
+
 ## Results
 
 ### 1. How far can you sample before noise takes over?
@@ -171,6 +191,15 @@ correct on EURUSD mid quotes, which is a statement about this market rather
 than about the estimators; they are validated against simulated paths with
 known answers instead.
 
+### 3. Forecasting status
+
+The full forecasting pipeline is implemented and leakage-tested. It compares
+historical-mean, naïve persistence, AR(1), and HAR-RV forecasts on the same
+expanding windows using QLIKE and log-RV MSE, then applies one-sided
+Diebold-Mariano tests with a Newey-West variance estimate. Numerical forecast
+conclusions remain provisional until the expanded historical dataset has
+finished downloading and the final evaluation window is frozen.
+
 ## Limitations
 
 - **One instrument, one quarter.** EURUSD in Q1 2024 was quiet, at roughly 5.6%
@@ -187,5 +216,7 @@ known answers instead.
 - **Sessions are dropped, not adjusted.** Any session covering under 12 hours
   is excluded, which removes the Sunday-evening opens and holidays instead of
   modelling them.
-- **No forecasting yet.** Everything so far measures volatility in-sample;
-  nothing has been predicted or compared out-of-sample.
+- **Forecast results are not final.** The out-of-sample machinery is complete,
+  but the expanded historical dataset is still being assembled. Current model
+  rankings use incomplete coverage and should not be presented as the final
+  empirical conclusion.

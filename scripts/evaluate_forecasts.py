@@ -12,12 +12,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 
-import pandas as pd
-
 from rvol.application import WalkForwardExperiment
 from rvol.domain import ExperimentConfig
 from rvol.evaluation import ForecastEvaluator
 from rvol.features.forecasting import build_har_features
+from rvol.infrastructure import ParquetDatasetRepository
 from rvol.models import (
     AR1Forecaster,
     HARForecaster,
@@ -49,7 +48,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    daily = pd.read_parquet(args.daily)
+    daily = ParquetDatasetRepository(args.daily).load()
     features = build_har_features(daily)
     experiment = WalkForwardExperiment(
         models=(

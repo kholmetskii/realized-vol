@@ -12,7 +12,8 @@ import argparse
 import glob
 import pathlib
 
-from rvol.features.dataset import build_daily_dataset, write_daily_dataset
+from rvol.features.dataset import build_daily_dataset
+from rvol.infrastructure import ParquetDatasetRepository
 
 
 def expand_inputs(patterns: list[str]) -> list[pathlib.Path]:
@@ -49,7 +50,7 @@ def main() -> None:
     )
     if dataset.empty:
         raise SystemExit("no complete sessions found in the input files")
-    write_daily_dataset(dataset, output)
+    ParquetDatasetRepository(output).save(dataset)
 
     print(f"input files:      {len(inputs)}")
     print(f"daily sessions:   {len(dataset)}")

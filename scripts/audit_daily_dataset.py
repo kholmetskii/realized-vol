@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import argparse
 
-import pandas as pd
-
 from rvol.features.coverage import audit_daily_dataset
+from rvol.infrastructure import ParquetDatasetRepository
 
 
 def main() -> None:
@@ -23,7 +22,7 @@ def main() -> None:
     parser.add_argument("--max-gap-days", type=int, default=7)
     args = parser.parse_args()
 
-    daily = pd.read_parquet(args.daily)
+    daily = ParquetDatasetRepository(args.daily).load()
     audit = audit_daily_dataset(
         daily,
         rv_col=args.rv_column,
