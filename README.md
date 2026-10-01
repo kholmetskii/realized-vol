@@ -133,6 +133,19 @@ mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
 records dataset coverage and a SHA-256 fingerprint so the exact input can be
 verified later. Repeating an unchanged run produces byte-identical artifacts.
 
+Run the fixed robustness checks without changing the model specifications:
+
+    python scripts/robustness_report.py \
+        data/derived/EURUSD_daily_rv_5min.parquet \
+        --min-train-size 200 \
+        --forecast-start 2024-01-01 \
+        --forecast-end 2024-03-31 \
+        --output-dir outputs/final_evaluation/robustness
+
+This report checks Newey–West lags from zero through five, monthly losses,
+session-level HAR win rates, and each model's five largest absolute log-RV
+errors. Detailed CSV files and a combined Markdown report are written together.
+
 ## Install
 
     python -m venv .venv && source .venv/bin/activate

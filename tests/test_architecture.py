@@ -8,9 +8,16 @@ PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[1] / "src" / "rvol"
 LAYER_DEPENDENCIES = {
     "domain": {"domain"},
     "application": {"application", "domain"},
+    "evaluation": {"domain", "evaluation"},
     "models": {"domain", "models"},
     "infrastructure": {"domain", "infrastructure"},
     "reporting": {"domain", "evaluation", "reporting"},
+}
+
+# This module preserves the pre-refactor public API by delegating to the new
+# application service and model adapters. No new evaluation module gets this exception.
+FILE_DEPENDENCY_EXCEPTIONS = {
+    ("evaluation", "walk_forward.py"): {"application", "models"},
 }
 
 
@@ -36,7 +43,8 @@ def test_clean_architecture_dependency_direction(layer):
     allowed = LAYER_DEPENDENCIES[layer]
     violations: list[str] = []
     for path in sorted((PACKAGE_ROOT / layer).glob("*.py")):
-        forbidden = rvol_dependencies(path).difference(allowed)
+        file_allowed = allowed | FILE_DEPENDENCY_EXCEPTIONS.get((layer, path.name), set())
+        forbidden = rvol_dependencies(path).difference(file_allowed)
         if forbidden:
             violations.append(f"{path.name}: {', '.join(sorted(forbidden))}")
 

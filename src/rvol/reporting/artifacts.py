@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import pathlib
-import tempfile
 from dataclasses import asdict, dataclass
 from datetime import date
-from typing import Any
 
 import pandas as pd
 
 from rvol.domain import ExperimentConfig, ExperimentResult
 from rvol.evaluation import EvaluationResult
+from rvol.reporting._files import atomic_csv, atomic_text
 
 
 @dataclass(frozen=True)
@@ -80,45 +78,6 @@ class ForecastArtifactWriter:
     def __init__(self, output_dir: str | pathlib.Path) -> None:
         self.output_dir = pathlib.Path(output_dir)
 
-    @staticmethod
-    def _atomic_csv(frame: pd.DataFrame, destination: pathlib.Path) -> None:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{destination.stem}-",
-            suffix=destination.suffix,
-            dir=destination.parent,
-        )
-        os.close(descriptor)
-        temporary = pathlib.Path(temporary_name)
-        try:
-            frame.to_csv(
-                temporary,
-                index=False,
-                float_format="%.17g",
-                lineterminator="\n",
-            )
-            temporary.replace(destination)
-        finally:
-            temporary.unlink(missing_ok=True)
-
-    @staticmethod
-    def _atomic_json(payload: dict[str, Any], destination: pathlib.Path) -> None:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{destination.stem}-",
-            suffix=destination.suffix,
-            dir=destination.parent,
-            text=True,
-        )
-        os.close(descriptor)
-        temporary = pathlib.Path(temporary_name)
-        try:
-            temporary.write_text(
-                json.dumps(payload, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
-            temporary.replace(destination)
-        finally:
-            temporary.unlink(missing_ok=True)
-
     def write(
         self,
         experiment: ExperimentResult,
@@ -174,9 +133,9 @@ class ForecastArtifactWriter:
             "p_value",
             "hac_lags",
         ]
-        self._atomic_csv(pd.DataFrame(forecast_rows, columns=forecast_columns), paths.forecasts)
-        self._atomic_csv(pd.DataFrame(summary_rows, columns=summary_columns), paths.loss_summary)
-        self._atomic_csv(
+        atomic_csv(pd.DataFrame(forecast_rows, columns=forecast_columns), paths.forecasts)
+        atomic_csv(pd.DataFrame(summary_rows, columns=summary_columns), paths.loss_summary)
+        atomic_csv(
             pd.DataFrame(comparison_rows, columns=comparison_columns),
             paths.comparisons,
         )
@@ -221,5 +180,5 @@ class ForecastArtifactWriter:
                 "hac_lags": None if not hac_lags else hac_lags[0],
             },
         }
-        self._atomic_json(payload, paths.experiment)
+        atomic_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", paths.experiment)
         return paths
