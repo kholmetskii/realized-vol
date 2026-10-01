@@ -70,3 +70,11 @@ def test_duplicate_session_dates_are_rejected():
 
     with pytest.raises(ValueError, match="one row per session"):
         build_har_features(daily)
+
+
+def test_large_gap_is_rejected_before_rolling_features_are_built():
+    daily = daily_sample()
+    daily.loc[20:, "date"] += pd.Timedelta(days=30)
+
+    with pytest.raises(ValueError, match=r"\d+-day gap"):
+        build_har_features(daily)

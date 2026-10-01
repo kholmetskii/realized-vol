@@ -70,6 +70,16 @@ timestamps and session dates, and writes the output atomically. The result has
 one row per complete session with the session date, realised variance, log
 realised variance, and the number of sampled observations.
 
+Audit coverage before forecasting:
+
+    python scripts/audit_daily_dataset.py \
+        data/derived/EURUSD_daily_rv_5min.parquet
+
+The audit checks ordering, duplicate and invalid values, observation counts,
+annual session coverage, and gaps longer than seven calendar days. HAR feature
+construction rejects such gaps by default so disconnected periods cannot be
+treated as consecutive trading sessions.
+
 `rvol.features.forecasting.build_har_features` converts that daily table into
 one-session-ahead HAR-RV rows. Each row records its forecast origin and target
 dates explicitly, using the current session, latest five sessions, and latest
