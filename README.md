@@ -85,21 +85,22 @@ one-session-ahead HAR-RV rows. Each row records its forecast origin and target
 dates explicitly, using the current session, latest five sessions, and latest
 22 sessions as predictors of the following session's log realised variance.
 
-`rvol.evaluation.walk_forward.walk_forward_forecasts` compares a naïve
-"tomorrow equals today" forecast with an expanding-window HAR-RV regression.
-Training outcomes are admitted only after their target dates have become
-observable, preventing future information from leaking into a forecast.
+`rvol.application.WalkForwardExperiment` runs historical-mean, naïve, AR(1),
+and HAR-RV forecasters over identical expanding windows. Training outcomes are
+admitted only after their target dates have become observable, preventing
+future information from leaking into a forecast.
 
 Run the complete out-of-sample comparison with:
 
     python scripts/evaluate_forecasts.py \
         data/derived/EURUSD_daily_rv_5min.parquet \
-        --forecast-start 2023-01-01
+        --forecast-start 2023-01-01 \
+        --forecast-end 2023-12-31
 
-The report shows mean QLIKE and log-RV squared loss for both models, followed
-by a one-sided Diebold-Mariano test of whether HAR has lower expected loss. The
-test uses a Newey-West long-run variance estimate for serially correlated loss
-differences; a positive difference favours HAR.
+The report shows mean QLIKE and log-RV squared loss for every model, followed
+by a one-sided Diebold-Mariano test of whether HAR has lower expected loss than
+the naïve benchmark. The test uses a Newey-West long-run variance estimate for
+serially correlated loss differences; a positive difference favours HAR.
 
 ## Install
 
