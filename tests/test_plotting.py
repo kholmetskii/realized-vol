@@ -7,11 +7,14 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from rvol.diagnostics.microstructure import NoiseTest  # noqa: E402
+from rvol.domain import ExperimentResult, ForecastRecord, ModelLossSummary  # noqa: E402
+from rvol.evaluation import EvaluationResult, LossRecord  # noqa: E402
 from rvol.plotting.daily import plot_daily_realized_variance  # noqa: E402
 from rvol.plotting.diagnostics import (  # noqa: E402
     plot_diagnostics_overview,
     plot_volatility_signature,
 )
+from rvol.plotting.forecasting import plot_forecast_evaluation  # noqa: E402
 from rvol.plotting.microstructure import plot_bid_ask_bounce  # noqa: E402
 from rvol.plotting.returns import (  # noqa: E402
     plot_cumulative_iv_vs_rv,
@@ -150,4 +153,58 @@ def test_heston_plot_builds_price_variance_and_integrated_variance_panels():
     figure = plot_heston_path(prices, variance, dt=1 / 252 / 49, theta=0.04)
 
     assert len(figure.axes) == 3
+    plt.close(figure)
+
+
+def test_forecast_evaluation_plot_builds_paths_losses_and_advantage_panels():
+    dates = pd.bdate_range("2024-01-02", periods=6)
+    actual = np.array([-10.0, -9.7, -10.2, -9.8, -10.1, -9.6])
+    errors = {
+        "naive": np.array([0.4, -0.3, 0.5, -0.2, 0.35, -0.4]),
+        "AR1": np.array([0.3, -0.2, 0.35, -0.15, 0.25, -0.3]),
+        "HAR": np.array([0.1, -0.1, 0.15, -0.05, 0.1, -0.12]),
+    }
+    records = []
+    losses = []
+    summaries = []
+    for model, model_errors in errors.items():
+        model_losses = np.square(model_errors)
+        summaries.append(ModelLossSummary(
+            model=model,
+            metric="QLIKE",
+            n_obs=len(dates),
+            mean_loss=float(np.mean(model_losses)),
+        ))
+        for index, target_date in enumerate(dates):
+            prediction = actual[index] + model_errors[index]
+            records.append(ForecastRecord(
+                model=model,
+                origin_date=(target_date - pd.Timedelta(days=1)).date(),
+                target_date=target_date.date(),
+                n_train=200 + index,
+                actual_log_rv=float(actual[index]),
+                predicted_log_rv=float(prediction),
+                actual_rv=float(np.exp(actual[index])),
+                predicted_rv=float(np.exp(prediction)),
+            ))
+            losses.append(LossRecord(
+                model=model,
+                metric="QLIKE",
+                target_date=target_date.date(),
+                loss=float(model_losses[index]),
+            ))
+
+    figure = plot_forecast_evaluation(
+        ExperimentResult(records=tuple(records)),
+        EvaluationResult(
+            losses=tuple(losses),
+            summaries=tuple(summaries),
+            comparisons=(),
+        ),
+    )
+
+    assert len(figure.axes) == 3
+    assert figure.axes[0].get_title() == "Forecast paths"
+    assert len(figure.axes[1].patches) == 3
+    assert len(figure.axes[2].lines) == 3
     plt.close(figure)

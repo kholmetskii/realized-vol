@@ -60,13 +60,19 @@ inner layer cannot accidentally import an outer adapter.
     python scripts/daily_rv_plot.py
     python scripts/heston_plot.py
     python scripts/simulation_plots.py
+    python scripts/forecast_plots.py \
+        data/derived/EURUSD_daily_rv_5min.parquet \
+        --min-train-size 200 \
+        --forecast-start 2024-01-01 \
+        --forecast-end 2024-03-31
     python scripts/diagnostics_plots.py \
         data/EURUSD_2024-01-01_2024-03-31.parquet
 
 The scripts write `figures/sampling_grids.png`, `figures/returns_and_rv.png`,
 `figures/cumulative_iv_vs_rv.png`, `figures/bid_ask_bounce.png`,
 `figures/daily_rv.png`, `figures/heston_simulation.png`,
-`figures/simulation_overview.png`, and `figures/diagnostics_overview.png`.
+`figures/simulation_overview.png`, `figures/forecast_evaluation.png`, and
+`figures/diagnostics_overview.png`.
 Use `scripts/signature_plot.py` when only one mid, bid, or ask signature is
 needed.
 
@@ -199,6 +205,8 @@ expanding windows using QLIKE and log-RV MSE, then applies one-sided
 Diebold-Mariano tests with a Newey-West variance estimate. Numerical forecast
 conclusions remain provisional until the expanded historical dataset has
 finished downloading and the final evaluation window is frozen.
+
+![Out-of-sample forecast evaluation](figures/forecast_evaluation.png)
 
 ## Limitations
 
