@@ -23,8 +23,11 @@ class FittedForecaster(Protocol):
 class Forecaster(Protocol):
     """An unfitted forecasting strategy used by a walk-forward experiment."""
 
-    name: str
-    feature_names: tuple[str, ...]
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def feature_names(self) -> tuple[str, ...]: ...
 
     def fit(self, features: FloatArray, target: FloatArray) -> FittedForecaster: ...
 
@@ -33,8 +36,11 @@ class Forecaster(Protocol):
 class ForecastMetric(Protocol):
     """A per-observation loss metric on one declared forecast scale."""
 
-    name: str
-    scale: ForecastScale
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def scale(self) -> ForecastScale: ...
 
     def losses(self, actual: FloatArray, predicted: FloatArray) -> FloatArray: ...
 

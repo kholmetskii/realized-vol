@@ -65,3 +65,17 @@ def test_forecast_start_preserves_all_prior_training_data():
 
     assert forecasts.loc[0, "target_date"] == start
     assert forecasts.loc[0, "n_train"] == 30
+
+
+def test_forecast_end_is_inclusive():
+    features = feature_sample()
+    end = features.loc[35, "target_date"]
+
+    forecasts = walk_forward_forecasts(
+        features,
+        min_train_size=20,
+        forecast_end=end,
+    )
+
+    assert forecasts["target_date"].iloc[-1] == end
+    assert len(forecasts) == 16
