@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from rvol.domain.contracts import FloatArray
+from rvol.models.base import LinearPredictor, fit_linear_regression
+
 HAR_FEATURES = ("rv_daily", "rv_weekly", "rv_monthly")
 
 
@@ -41,22 +44,30 @@ class HarModel:
         return self.intercept + matrix @ self.coefficients
 
 
+class HARForecaster:
+    """Fit daily, weekly, and monthly log-RV components by OLS."""
+
+    name = "HAR"
+    feature_names = HAR_FEATURES
+
+    def fit(self, features: FloatArray, target: FloatArray) -> LinearPredictor:
+        return fit_linear_regression(
+            features,
+            target,
+            n_features=len(self.feature_names),
+        )
+
+
 def fit_har(features: pd.DataFrame, *, target_col: str = "target") -> HarModel:
     """Fit a log HAR-RV regression by ordinary least squares."""
     matrix = _feature_matrix(features)
     if target_col not in features:
         raise ValueError(f"HAR data is missing target column: {target_col}")
     target = pd.to_numeric(features[target_col], errors="coerce").to_numpy(dtype="float64")
-    if len(target) < len(HAR_FEATURES) + 1:
-        raise ValueError("HAR fitting requires at least four observations")
-    if not np.all(np.isfinite(target)):
-        raise ValueError("HAR target must contain finite numeric values")
-
-    design = np.column_stack([np.ones(len(matrix)), matrix])
-    coefficients, *_ = np.linalg.lstsq(design, target, rcond=None)
+    fitted = HARForecaster().fit(matrix, target)
     return HarModel(
-        intercept=float(coefficients[0]),
-        daily=float(coefficients[1]),
-        weekly=float(coefficients[2]),
-        monthly=float(coefficients[3]),
+        intercept=fitted.intercept,
+        daily=fitted.coefficients[0],
+        weekly=fitted.coefficients[1],
+        monthly=fitted.coefficients[2],
     )
