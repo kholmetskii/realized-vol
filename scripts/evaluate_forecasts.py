@@ -23,6 +23,7 @@ from rvol.models import (
     HistoricalMeanForecaster,
     NaiveForecaster,
 )
+from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
 
 
 def iso_date(value: str) -> dt.date:
@@ -40,6 +41,10 @@ def main() -> None:
     parser.add_argument("--forecast-end", type=iso_date, help="last target date to evaluate")
     parser.add_argument("--hac-lags", type=int)
     parser.add_argument(
+        "--output-dir",
+        help="optional directory for deterministic CSV and JSON result artifacts",
+    )
+    parser.add_argument(
         "--compare",
         action="append",
         nargs=2,
@@ -50,6 +55,11 @@ def main() -> None:
 
     daily = ParquetDatasetRepository(args.daily).load()
     features = build_har_features(daily)
+    config = ExperimentConfig(
+        min_train_size=args.min_train_size,
+        forecast_start=args.forecast_start,
+        forecast_end=args.forecast_end,
+    )
     experiment = WalkForwardExperiment(
         models=(
             HistoricalMeanForecaster(),
@@ -57,11 +67,7 @@ def main() -> None:
             AR1Forecaster(),
             HARForecaster(),
         ),
-        config=ExperimentConfig(
-            min_train_size=args.min_train_size,
-            forecast_start=args.forecast_start,
-            forecast_end=args.forecast_end,
-        ),
+        config=config,
     )
     experiment_result = experiment.run(features)
     if not experiment_result.records:
@@ -101,6 +107,17 @@ def main() -> None:
         )
     if evaluation.comparisons:
         print(f"\nNewey-West lags: {evaluation.comparisons[0].hac_lags}")
+    if args.output_dir:
+        snapshot = DatasetSnapshot.from_frame(args.daily, daily)
+        artifact_paths = ForecastArtifactWriter(args.output_dir).write(
+            experiment_result,
+            evaluation,
+            config=config,
+            dataset=snapshot,
+        )
+        print("\nartifacts:")
+        for path in artifact_paths.all():
+            print(f"  {path}")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ LAYER_DEPENDENCIES = {
     "application": {"application", "domain"},
     "models": {"domain", "models"},
     "infrastructure": {"domain", "infrastructure"},
+    "reporting": {"domain", "evaluation", "reporting"},
 }
 
 

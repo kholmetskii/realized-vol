@@ -15,6 +15,7 @@ with error?
     src/rvol/application/  model-agnostic walk-forward use cases
     src/rvol/models/       interchangeable volatility forecasting models
     src/rvol/evaluation/   loss metrics and statistical model comparison
+    src/rvol/reporting/    deterministic experiment artifacts
     src/rvol/infrastructure/ Parquet persistence adapters
     src/rvol/data/         external data download and parsing
     src/rvol/market/       FX sessions and timestamp sampling rules
@@ -34,6 +35,7 @@ The forecasting dependency direction points toward stable contracts:
        ├── application ────────────┐
        ├── models ─────────────────┤
        ├── evaluation ─────────────┼──> domain
+       ├── reporting ──> evaluation┤
        └── infrastructure ─────────┘
 
 The independent data-preparation pipeline is:
@@ -114,13 +116,22 @@ Run the complete out-of-sample comparison with:
 
     python scripts/evaluate_forecasts.py \
         data/derived/EURUSD_daily_rv_5min.parquet \
-        --forecast-start 2023-01-01 \
-        --forecast-end 2023-12-31
+        --min-train-size 200 \
+        --forecast-start 2024-01-01 \
+        --forecast-end 2024-03-31 \
+        --compare naive HAR \
+        --compare AR1 HAR \
+        --compare historical_mean HAR \
+        --output-dir outputs/final_evaluation
 
 The report shows mean QLIKE and log-RV squared loss for every model, followed
 by a one-sided Diebold-Mariano test of whether HAR has lower expected loss than
 the naïve benchmark. The test uses a Newey-West long-run variance estimate for
 serially correlated loss differences; a positive difference favours HAR.
+When `--output-dir` is provided, the same run also writes normalized forecasts,
+mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
+records dataset coverage and a SHA-256 fingerprint so the exact input can be
+verified later. Repeating an unchanged run produces byte-identical artifacts.
 
 ## Install
 
