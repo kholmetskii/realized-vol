@@ -7,7 +7,7 @@ from rvol.domain.contracts import (
     Forecaster,
     ForecastMetric,
 )
-from rvol.domain.results import ExperimentResult, ForecastRecord, ModelLossSummary
+from rvol.domain.results import ExperimentResult, ForecastRecord
 
 __all__ = [
     "DatasetRepository",
@@ -17,5 +17,4 @@ __all__ = [
     "Forecaster",
     "ForecastMetric",
     "ForecastRecord",
-    "ModelLossSummary",
 ]

@@ -10,7 +10,7 @@ from datetime import date
 import numpy as np
 
 from rvol.domain.contracts import ForecastMetric
-from rvol.domain.results import ExperimentResult, ForecastRecord, ModelLossSummary
+from rvol.domain.results import ExperimentResult, ForecastRecord
 from rvol.evaluation.comparison import diebold_mariano
 from rvol.evaluation.metrics import LogMSEMetric, QLikeMetric
 
@@ -23,6 +23,26 @@ class LossRecord:
     metric: str
     target_date: date
     loss: float
+
+
+@dataclass(frozen=True)
+class ModelLossSummary:
+    """Mean out-of-sample loss for one model and metric."""
+
+    model: str
+    metric: str
+    n_obs: int
+    mean_loss: float
+
+    def __post_init__(self) -> None:
+        if not self.model.strip():
+            raise ValueError("model must not be empty")
+        if not self.metric.strip():
+            raise ValueError("metric must not be empty")
+        if self.n_obs < 1:
+            raise ValueError("n_obs must be positive")
+        if not np.isfinite(self.mean_loss) or self.mean_loss < 0:
+            raise ValueError("mean_loss must be finite and non-negative")
 
 
 @dataclass(frozen=True)
@@ -98,15 +118,11 @@ class ForecastEvaluator:
         reference = grouped[reference_model]
         reference_dates = [record.target_date for record in reference]
         reference_actual_log = np.array([record.actual_log_rv for record in reference])
-        reference_actual = np.array([record.actual_rv for record in reference])
         for model, records in grouped.items():
             if [record.target_date for record in records] != reference_dates:
                 raise ValueError("all models must forecast identical target dates")
             actual_log = np.array([record.actual_log_rv for record in records])
-            actual = np.array([record.actual_rv for record in records])
-            if not np.array_equal(actual_log, reference_actual_log) or not np.array_equal(
-                actual, reference_actual
-            ):
+            if not np.array_equal(actual_log, reference_actual_log):
                 raise ValueError(f"actual values disagree across models for {model}")
         return dict(grouped)
 

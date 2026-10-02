@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -6,7 +7,7 @@ import pytest
 
 from rvol.application import WalkForwardExperiment
 from rvol.domain import ExperimentConfig, ExperimentResult
-from rvol.evaluation import ForecastEvaluator
+from rvol.evaluation import ForecastEvaluator, ModelLossSummary
 from rvol.models import (
     AR1Forecaster,
     HARForecaster,
@@ -91,9 +92,9 @@ def test_evaluator_supports_additional_pairwise_comparisons():
 
 def test_validation_and_test_evaluations_remain_date_disjoint():
     features = feature_sample()
-    validation_start = features.loc[25, "target_date"].date()
-    validation_end = features.loc[34, "target_date"].date()
-    test_start = features.loc[35, "target_date"].date()
+    validation_start = cast(pd.Timestamp, features.loc[25, "target_date"]).date()
+    validation_end = cast(pd.Timestamp, features.loc[34, "target_date"]).date()
+    test_start = cast(pd.Timestamp, features.loc[35, "target_date"]).date()
     validation = ForecastEvaluator().evaluate(
         experiment_result(forecast_start=validation_start, forecast_end=validation_end)
     )
@@ -120,3 +121,21 @@ def test_evaluator_rejects_misaligned_models_and_unknown_comparison_names():
 def test_evaluator_rejects_an_explicitly_empty_metric_collection():
     with pytest.raises(ValueError, match="at least one"):
         ForecastEvaluator(metrics=())
+
+
+@pytest.mark.parametrize(
+    "changes, message",
+    [
+        ({"model": ""}, "model"),
+        ({"metric": ""}, "metric"),
+        ({"n_obs": 0}, "positive"),
+        ({"mean_loss": -1.0}, "non-negative"),
+        ({"mean_loss": float("nan")}, "finite"),
+    ],
+)
+def test_model_loss_summary_rejects_invalid_evaluation_values(changes, message):
+    values = {"model": "HAR", "metric": "QLIKE", "n_obs": 20, "mean_loss": 0.1}
+    values.update(changes)
+
+    with pytest.raises(ValueError, match=message):
+        ModelLossSummary(**cast(Any, values))

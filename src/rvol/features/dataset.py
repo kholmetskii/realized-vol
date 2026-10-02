@@ -117,10 +117,3 @@ def build_daily_dataset(
     result = result.sort_values(["date", "observation_count"])
     result = result.drop_duplicates("date", keep="last").sort_values("date")
     return result.reset_index(drop=True)[columns]
-
-
-def write_daily_dataset(dataset: pd.DataFrame, destination: str | pathlib.Path) -> None:
-    """Compatibility wrapper for the infrastructure persistence adapter."""
-    from rvol.infrastructure import ParquetDatasetRepository
-
-    ParquetDatasetRepository(destination).save(dataset)

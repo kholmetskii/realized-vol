@@ -98,7 +98,19 @@ class ForecastArtifactWriter:
         )
 
         forecast_rows = sorted(
-            (asdict(record) for record in experiment.records),
+            (
+                {
+                    "model": record.model,
+                    "origin_date": record.origin_date,
+                    "target_date": record.target_date,
+                    "n_train": record.n_train,
+                    "actual_log_rv": record.actual_log_rv,
+                    "predicted_log_rv": record.predicted_log_rv,
+                    "actual_rv": record.actual_rv,
+                    "predicted_rv": record.predicted_rv,
+                }
+                for record in experiment.records
+            ),
             key=lambda row: (row["target_date"], row["model"]),
         )
         summary_rows = sorted(

@@ -9,7 +9,7 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from rvol.domain.contracts import FloatArray
-from rvol.models.base import LinearPredictor, fit_linear_regression
+from rvol.models.linear import LinearPredictor, fit_ols
 
 HAR_FEATURES = ("rv_daily", "rv_weekly", "rv_monthly")
 
@@ -51,7 +51,7 @@ class HARForecaster:
     feature_names = HAR_FEATURES
 
     def fit(self, features: FloatArray, target: FloatArray) -> LinearPredictor:
-        return fit_linear_regression(
+        return fit_ols(
             features,
             target,
             n_features=len(self.feature_names),

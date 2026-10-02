@@ -4,6 +4,7 @@ from rvol.evaluation.evaluator import (
     EvaluationResult,
     ForecastEvaluator,
     LossRecord,
+    ModelLossSummary,
     PairwiseComparison,
 )
 from rvol.evaluation.metrics import LogMSEMetric, QLikeMetric
@@ -22,6 +23,7 @@ __all__ = [
     "ForecastRobustnessAnalyzer",
     "LogMSEMetric",
     "LossRecord",
+    "ModelLossSummary",
     "PairwiseComparison",
     "QLikeMetric",
     "MonthlyLossSummary",

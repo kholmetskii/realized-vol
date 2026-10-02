@@ -1,4 +1,4 @@
-"""Characterization tests for the pre-refactor forecasting pipeline.
+"""Characterization tests for the canonical forecasting pipeline.
 
 These assertions intentionally lock the current end-to-end behavior. Update
 the golden values only when a numerical or alignment change is deliberate.
@@ -8,9 +8,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.evaluation.comparison import compare_forecasts
-from rvol.evaluation.walk_forward import FORECAST_COLUMNS, walk_forward_forecasts
+from rvol.application import WalkForwardExperiment
+from rvol.domain import ExperimentConfig
+from rvol.evaluation import ForecastEvaluator
 from rvol.features.forecasting import build_har_features
+from rvol.models import HARForecaster, NaiveForecaster
 
 
 @pytest.fixture(scope="module")
@@ -30,15 +32,18 @@ def characterized_pipeline():
         "observation_count": np.full(n_sessions, 288),
     })
     features = build_har_features(daily)
-    forecasts = walk_forward_forecasts(features, min_train_size=25)
-    comparisons = compare_forecasts(forecasts, hac_lags=3)
-    return features, forecasts, comparisons
+    experiment = WalkForwardExperiment(
+        models=(NaiveForecaster(), HARForecaster()),
+        config=ExperimentConfig(min_train_size=25),
+    ).run(features)
+    evaluation = ForecastEvaluator(hac_lags=3).evaluate(experiment)
+    return features, experiment, evaluation
 
 
 def test_walk_forward_pipeline_matches_current_alignment_and_predictions(
     characterized_pipeline,
 ):
-    features, forecasts, _ = characterized_pipeline
+    features, experiment, _ = characterized_pipeline
 
     assert len(features) == 68
     assert features.loc[0, "origin_date"] == pd.Timestamp("2020-01-31")
@@ -46,18 +51,25 @@ def test_walk_forward_pipeline_matches_current_alignment_and_predictions(
     assert features.loc[67, "origin_date"] == pd.Timestamp("2020-05-05")
     assert features.loc[67, "target_date"] == pd.Timestamp("2020-05-06")
 
-    assert list(forecasts.columns) == FORECAST_COLUMNS
-    assert len(forecasts) == 43
-    assert forecasts.loc[0, "origin_date"] == pd.Timestamp("2020-03-06")
-    assert forecasts.loc[0, "target_date"] == pd.Timestamp("2020-03-09")
-    assert forecasts.loc[42, "origin_date"] == pd.Timestamp("2020-05-05")
-    assert forecasts.loc[42, "target_date"] == pd.Timestamp("2020-05-06")
-    np.testing.assert_array_equal(forecasts["n_train"], np.arange(25, 68))
+    by_model = {
+        model: [record for record in experiment.records if record.model == model]
+        for model in experiment.models
+    }
+    naive = by_model["naive"]
+    har = by_model["HAR"]
 
-    selected = forecasts.loc[
-        [0, 21, 42],
-        ["actual_log_rv", "naive_log_prediction", "har_log_prediction"],
-    ].to_numpy()
+    assert experiment.n_forecasts == 86
+    assert len(naive) == len(har) == 43
+    assert har[0].origin_date == pd.Timestamp("2020-03-06").date()
+    assert har[0].target_date == pd.Timestamp("2020-03-09").date()
+    assert har[42].origin_date == pd.Timestamp("2020-05-05").date()
+    assert har[42].target_date == pd.Timestamp("2020-05-06").date()
+    np.testing.assert_array_equal([record.n_train for record in har], np.arange(25, 68))
+
+    selected = np.array([
+        [har[index].actual_log_rv, naive[index].predicted_log_rv, har[index].predicted_log_rv]
+        for index in (0, 21, 42)
+    ])
     expected = np.array([
         [-9.757338569918984, -9.654409842525581, -9.812760345626966],
         [-10.195348190910776, -10.115053704270585, -10.1806092207242],
@@ -66,9 +78,9 @@ def test_walk_forward_pipeline_matches_current_alignment_and_predictions(
     np.testing.assert_allclose(selected, expected, rtol=1e-10, atol=1e-10)
     np.testing.assert_allclose(
         [
-            forecasts["har_log_prediction"].sum(),
-            forecasts["naive_log_prediction"].sum(),
-            forecasts["actual_log_rv"].sum(),
+            sum(record.predicted_log_rv for record in har),
+            sum(record.predicted_log_rv for record in naive),
+            sum(record.actual_log_rv for record in har),
         ],
         [-425.47912683545536, -424.8527856107647, -425.16724897521885],
         rtol=1e-10,
@@ -77,16 +89,16 @@ def test_walk_forward_pipeline_matches_current_alignment_and_predictions(
 
 
 def test_statistical_comparison_matches_current_pipeline(characterized_pipeline):
-    _, _, comparisons = characterized_pipeline
-    by_metric = {result.metric: result for result in comparisons}
+    _, _, evaluation = characterized_pipeline
+    by_metric = {result.metric: result for result in evaluation.comparisons}
 
     qlike = by_metric["QLIKE"]
     assert qlike.n_obs == 43
     assert qlike.hac_lags == 3
     np.testing.assert_allclose(
         [
-            qlike.naive_mean_loss,
-            qlike.har_mean_loss,
+            qlike.baseline_mean_loss,
+            qlike.candidate_mean_loss,
             qlike.mean_loss_difference,
             qlike.dm_statistic,
             qlike.p_value,
@@ -107,8 +119,8 @@ def test_statistical_comparison_matches_current_pipeline(characterized_pipeline)
     assert log_mse.hac_lags == 3
     np.testing.assert_allclose(
         [
-            log_mse.naive_mean_loss,
-            log_mse.har_mean_loss,
+            log_mse.baseline_mean_loss,
+            log_mse.candidate_mean_loss,
             log_mse.mean_loss_difference,
             log_mse.dm_statistic,
             log_mse.p_value,

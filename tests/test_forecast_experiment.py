@@ -1,3 +1,5 @@
+from typing import cast
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -65,8 +67,8 @@ def test_experiment_runs_every_model_on_identical_expanding_windows():
 
 def test_date_bounds_are_inclusive_and_preserve_prior_training_data():
     features = feature_sample()
-    start = features.loc[30, "target_date"].date()
-    end = features.loc[35, "target_date"].date()
+    start = cast(pd.Timestamp, features.loc[30, "target_date"]).date()
+    end = cast(pd.Timestamp, features.loc[35, "target_date"]).date()
     experiment = WalkForwardExperiment(
         models=all_models(),
         config=ExperimentConfig(
@@ -86,12 +88,12 @@ def test_date_bounds_are_inclusive_and_preserve_prior_training_data():
 def test_current_target_cannot_change_its_own_prediction_for_any_model():
     original = feature_sample()
     changed = original.copy()
-    changed.loc[20, "target"] += 100.0
+    changed.loc[20, "target"] = cast(float, changed.loc[20, "target"]) + 100.0
     experiment = WalkForwardExperiment(
         models=all_models(),
         config=ExperimentConfig(min_train_size=20),
     )
-    target_day = original.loc[20, "target_date"].date()
+    target_day = cast(pd.Timestamp, original.loc[20, "target_date"]).date()
 
     before = experiment.run(original)
     after = experiment.run(changed)

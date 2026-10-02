@@ -5,37 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-import pandas as pd
 from numpy.typing import ArrayLike, NDArray
 from scipy.stats import norm
-
-from rvol.evaluation.losses import log_squared_error, qlike
 
 
 @dataclass(frozen=True)
 class DieboldMarianoResult:
-    """One-sided test of whether HAR has lower expected loss than naïve."""
+    """One-sided test of whether a candidate has lower expected loss."""
 
     n_obs: int
     mean_loss_difference: float
     statistic: float
     p_value: float
     hac_lags: int
-
-
-@dataclass(frozen=True)
-class ForecastComparison:
-    """Mean losses and their one-sided Diebold-Mariano comparison."""
-
-    metric: str
-    n_obs: int
-    naive_mean_loss: float
-    har_mean_loss: float
-    mean_loss_difference: float
-    dm_statistic: float
-    p_value: float
-    hac_lags: int
-
 
 def _loss_vector(values: ArrayLike, name: str) -> NDArray[np.float64]:
     vector = np.asarray(values, dtype="float64")
@@ -53,29 +35,29 @@ def _default_hac_lags(n_obs: int) -> int:
 
 
 def diebold_mariano(
-    naive_loss: ArrayLike,
-    har_loss: ArrayLike,
+    baseline_loss: ArrayLike,
+    candidate_loss: ArrayLike,
     *,
     hac_lags: int | None = None,
 ) -> DieboldMarianoResult:
-    """Test whether HAR's expected loss is lower than the naïve model's.
+    """Test whether a candidate's expected loss is lower than a baseline's.
 
-    The loss differential is ``naive_loss - har_loss``. The reported p-value
-    is one-sided for the alternative that its expectation is positive. A
+    The loss differential is ``baseline_loss - candidate_loss``. The reported
+    p-value is one-sided for the alternative that its expectation is positive. A
     Bartlett-kernel Newey-West estimate allows the differential to be serially
     correlated.
     """
-    naive = _loss_vector(naive_loss, "naive_loss")
-    har = _loss_vector(har_loss, "har_loss")
-    if naive.shape != har.shape:
-        raise ValueError("naive_loss and har_loss must have the same shape")
+    baseline = _loss_vector(baseline_loss, "baseline_loss")
+    candidate = _loss_vector(candidate_loss, "candidate_loss")
+    if baseline.shape != candidate.shape:
+        raise ValueError("baseline_loss and candidate_loss must have the same shape")
 
-    n_obs = len(naive)
+    n_obs = len(baseline)
     lags = _default_hac_lags(n_obs) if hac_lags is None else hac_lags
     if not 0 <= lags <= n_obs - 2:
         raise ValueError("hac_lags must satisfy 0 <= hac_lags <= n_obs - 2")
 
-    differential = naive - har
+    differential = baseline - candidate
     mean_difference = float(np.mean(differential))
     centered = differential - mean_difference
     long_run_variance = float(centered @ centered / n_obs)
@@ -104,56 +86,4 @@ def diebold_mariano(
         statistic=float(statistic),
         p_value=p_value,
         hac_lags=lags,
-    )
-
-
-def _comparison(
-    metric: str,
-    naive_loss: NDArray[np.float64],
-    har_loss: NDArray[np.float64],
-    hac_lags: int | None,
-) -> ForecastComparison:
-    test = diebold_mariano(naive_loss, har_loss, hac_lags=hac_lags)
-    return ForecastComparison(
-        metric=metric,
-        n_obs=test.n_obs,
-        naive_mean_loss=float(np.mean(naive_loss)),
-        har_mean_loss=float(np.mean(har_loss)),
-        mean_loss_difference=test.mean_loss_difference,
-        dm_statistic=test.statistic,
-        p_value=test.p_value,
-        hac_lags=test.hac_lags,
-    )
-
-
-def compare_forecasts(
-    forecasts: pd.DataFrame,
-    *,
-    hac_lags: int | None = None,
-) -> tuple[ForecastComparison, ForecastComparison]:
-    """Compare naïve and HAR walk-forward forecasts under both loss metrics."""
-    required = {
-        "actual_log_rv",
-        "naive_log_prediction",
-        "har_log_prediction",
-        "actual_rv",
-        "naive_rv_prediction",
-        "har_rv_prediction",
-    }
-    missing = required.difference(forecasts.columns)
-    if missing:
-        names = ", ".join(sorted(missing))
-        raise ValueError(f"forecasts are missing required columns: {names}")
-
-    qlike_naive = qlike(forecasts["actual_rv"], forecasts["naive_rv_prediction"])
-    qlike_har = qlike(forecasts["actual_rv"], forecasts["har_rv_prediction"])
-    log_mse_naive = log_squared_error(
-        forecasts["actual_log_rv"], forecasts["naive_log_prediction"]
-    )
-    log_mse_har = log_squared_error(
-        forecasts["actual_log_rv"], forecasts["har_log_prediction"]
-    )
-    return (
-        _comparison("QLIKE", qlike_naive, qlike_har, hac_lags),
-        _comparison("log-RV MSE", log_mse_naive, log_mse_har, hac_lags),
     )

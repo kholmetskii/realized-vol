@@ -5,21 +5,39 @@ import pytest
 
 PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[1] / "src" / "rvol"
 
-LAYER_DEPENDENCIES = {
+PACKAGE_DEPENDENCIES = {
+    "": set(),
     "domain": {"domain"},
     "application": {"application", "domain"},
+    "cli": {
+        "cli",
+        "composition",
+        "domain",
+        "evaluation",
+        "infrastructure",
+        "plotting",
+        "reporting",
+    },
+    "composition": {"application", "composition", "domain", "features", "models"},
+    "data": {"data"},
+    "diagnostics": {"diagnostics", "features", "market"},
+    "estimators": {"estimators"},
     "evaluation": {"domain", "evaluation"},
+    "features": {"estimators", "features", "market"},
+    "market": {"market"},
     "models": {"domain", "models"},
     "infrastructure": {"domain", "infrastructure"},
+    "plotting": {
+        "diagnostics",
+        "domain",
+        "estimators",
+        "evaluation",
+        "plotting",
+        "simulation",
+    },
     "reporting": {"domain", "evaluation", "reporting"},
+    "simulation": {"simulation"},
 }
-
-# This module preserves the pre-refactor public API by delegating to the new
-# application service and model adapters. No new evaluation module gets this exception.
-FILE_DEPENDENCY_EXCEPTIONS = {
-    ("evaluation", "walk_forward.py"): {"application", "models"},
-}
-
 
 def rvol_dependencies(path: pathlib.Path) -> set[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
@@ -38,14 +56,27 @@ def rvol_dependencies(path: pathlib.Path) -> set[str]:
     return dependencies
 
 
-@pytest.mark.parametrize("layer", sorted(LAYER_DEPENDENCIES))
-def test_clean_architecture_dependency_direction(layer):
-    allowed = LAYER_DEPENDENCIES[layer]
-    violations: list[str] = []
-    for path in sorted((PACKAGE_ROOT / layer).glob("*.py")):
-        file_allowed = allowed | FILE_DEPENDENCY_EXCEPTIONS.get((layer, path.name), set())
-        forbidden = rvol_dependencies(path).difference(file_allowed)
-        if forbidden:
-            violations.append(f"{path.name}: {', '.join(sorted(forbidden))}")
+def test_architecture_rules_cover_every_package():
+    package_directories = {
+        path.name
+        for path in PACKAGE_ROOT.iterdir()
+        if path.is_dir() and path.name != "__pycache__"
+    }
 
-    assert not violations, f"{layer} has outward dependencies: {'; '.join(violations)}"
+    assert set(PACKAGE_DEPENDENCIES).difference({""}) == package_directories
+
+
+@pytest.mark.parametrize("package", sorted(PACKAGE_DEPENDENCIES))
+def test_clean_architecture_dependency_direction(package: str):
+    allowed = PACKAGE_DEPENDENCIES[package]
+    violations: list[str] = []
+    package_root = PACKAGE_ROOT / package
+    paths = package_root.glob("*.py") if not package else package_root.rglob("*.py")
+    for path in sorted(paths):
+        relative_path = path.relative_to(package_root).as_posix()
+        forbidden = rvol_dependencies(path).difference(allowed)
+        if forbidden:
+            violations.append(f"{relative_path}: {', '.join(sorted(forbidden))}")
+
+    package_name = package or "rvol"
+    assert not violations, f"{package_name} has outward dependencies: {'; '.join(violations)}"

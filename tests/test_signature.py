@@ -4,6 +4,8 @@ Expectation: with no noise the curve is flat; with noise it rises toward high
 frequencies. This is the reference the real-data figure gets compared against.
 """
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -114,7 +116,9 @@ def test_short_sessions_are_dropped():
 
     kept = full_sessions(s)
     assert len(kept) == len(full)
-    assert set(trading_day(kept.index)) == {pd.Timestamp("2024-01-16")}
+    assert set(trading_day(cast(pd.DatetimeIndex, kept.index))) == {
+        pd.Timestamp("2024-01-16")
+    }
 
 
 @pytest.mark.slow

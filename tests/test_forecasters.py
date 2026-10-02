@@ -10,7 +10,7 @@ from rvol.models import (
     HistoricalMeanForecaster,
     NaiveForecaster,
 )
-from rvol.models.base import LinearPredictor
+from rvol.models.linear import LinearPredictor
 
 
 def assign_attribute(instance: object, name: str, value: object) -> None:
@@ -18,7 +18,7 @@ def assign_attribute(instance: object, name: str, value: object) -> None:
 
 
 def test_all_forecasters_implement_the_common_contract():
-    models = [
+    models: list[Forecaster] = [
         HistoricalMeanForecaster(),
         NaiveForecaster(),
         AR1Forecaster(),

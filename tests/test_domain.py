@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 from datetime import date
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -12,7 +13,6 @@ from rvol.domain import (
     Forecaster,
     ForecastMetric,
     ForecastRecord,
-    ModelLossSummary,
 )
 
 
@@ -63,8 +63,6 @@ def sample_record(model: str = "HAR") -> ForecastRecord:
         n_train=252,
         actual_log_rv=-10.0,
         predicted_log_rv=-10.1,
-        actual_rv=float(np.exp(-10.0)),
-        predicted_rv=float(np.exp(-10.1)),
     )
 
 
@@ -102,13 +100,19 @@ def test_experiment_config_is_immutable_and_validates_date_bounds():
 
 def test_result_objects_are_immutable_and_collect_model_names():
     record = sample_record()
-    loss = ModelLossSummary(model="naive", metric="QLIKE", n_obs=20, mean_loss=0.1)
-    result = ExperimentResult(records=(record,), loss_summaries=(loss,))
+    result = ExperimentResult(records=(record, sample_record("naive")))
 
     assert result.models == ("HAR", "naive")
-    assert result.n_forecasts == 1
+    assert result.n_forecasts == 2
     with pytest.raises(FrozenInstanceError):
         assign_attribute(record, "n_train", 10)
+
+
+def test_forecast_record_derives_variance_from_canonical_log_values():
+    record = sample_record()
+
+    assert record.actual_rv == float(np.exp(record.actual_log_rv))
+    assert record.predicted_rv == float(np.exp(record.predicted_log_rv))
 
 
 @pytest.mark.parametrize(
@@ -117,8 +121,9 @@ def test_result_objects_are_immutable_and_collect_model_names():
         ({"model": ""}, "model"),
         ({"origin_date": date(2024, 1, 3)}, "precede"),
         ({"n_train": 0}, "positive"),
-        ({"actual_rv": 0.0}, "strictly positive"),
         ({"predicted_log_rv": float("nan")}, "finite"),
+        ({"predicted_log_rv": 1000.0}, "finite positive variances"),
+        ({"predicted_log_rv": -1000.0}, "finite positive variances"),
     ],
 )
 def test_forecast_record_rejects_invalid_domain_values(changes, message):
@@ -129,10 +134,8 @@ def test_forecast_record_rejects_invalid_domain_values(changes, message):
         "n_train": 252,
         "actual_log_rv": -10.0,
         "predicted_log_rv": -10.1,
-        "actual_rv": float(np.exp(-10.0)),
-        "predicted_rv": float(np.exp(-10.1)),
     }
     values.update(changes)
 
     with pytest.raises(ValueError, match=message):
-        ForecastRecord(**values)
+        ForecastRecord(**cast(Any, values))

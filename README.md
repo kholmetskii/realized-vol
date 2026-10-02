@@ -15,6 +15,8 @@ with error?
 
     src/rvol/domain/       immutable configuration, results, and protocols
     src/rvol/application/  model-agnostic walk-forward use cases
+    src/rvol/cli/          packaged command-line entry points
+    src/rvol/composition/  standard model and feature assembly
     src/rvol/models/       interchangeable volatility forecasting models
     src/rvol/evaluation/   loss metrics and statistical model comparison
     src/rvol/reporting/    deterministic experiment artifacts
@@ -26,23 +28,28 @@ with error?
     src/rvol/diagnostics/  volatility signatures and microstructure tests
     src/rvol/plotting/     static research figures
     src/rvol/simulation/   latent prices, observation noise, Monte Carlo checks
-    scripts/               composition roots and reproducible entry points
+    scripts/               thin command-line and reproducibility entry points
     tests/                 checks against synthetic data with a known answer
 
 Additional noise- and jump-robust estimators are not yet implemented.
 
 The forecasting dependency direction points toward stable contracts:
 
-    scripts (composition root)
-       ├── application ────────────┐
-       ├── models ─────────────────┤
-       ├── evaluation ─────────────┼──> domain
-       ├── reporting ──> evaluation┤
-       └── infrastructure ─────────┘
+    cli (scripts delegate here)
+       ├── composition ─┬──> application ──> domain
+       │               ├──> models ────────> domain
+       │               └──> features
+       ├── evaluation ────────────────> domain
+       ├── reporting ──> evaluation + domain
+       └── infrastructure
+
+Installed environments also expose `rvol-evaluate-forecasts`,
+`rvol-forecast-plots`, and `rvol-robustness-report`. The corresponding files
+under `scripts/` remain as compatibility wrappers.
 
 The independent data-preparation pipeline is:
 
-    data + market + estimators ──> features ──> application
+    data + market + estimators ──> features ──> composition
 
 `estimators` contains no pandas, timestamps, FX conventions, or reporting.
 `market` contains no variance formulas. `features` is the adapter that combines

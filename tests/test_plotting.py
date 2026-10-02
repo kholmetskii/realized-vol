@@ -7,8 +7,8 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from rvol.diagnostics.microstructure import NoiseTest  # noqa: E402
-from rvol.domain import ExperimentResult, ForecastRecord, ModelLossSummary  # noqa: E402
-from rvol.evaluation import EvaluationResult, LossRecord  # noqa: E402
+from rvol.domain import ExperimentResult, ForecastRecord  # noqa: E402
+from rvol.evaluation import EvaluationResult, LossRecord, ModelLossSummary  # noqa: E402
 from rvol.plotting.daily import plot_daily_realized_variance  # noqa: E402
 from rvol.plotting.diagnostics import (  # noqa: E402
     plot_diagnostics_overview,
@@ -184,8 +184,6 @@ def test_forecast_evaluation_plot_builds_paths_losses_and_advantage_panels():
                 n_train=200 + index,
                 actual_log_rv=float(actual[index]),
                 predicted_log_rv=float(prediction),
-                actual_rv=float(np.exp(actual[index])),
-                predicted_rv=float(np.exp(prediction)),
             ))
             losses.append(LossRecord(
                 model=model,

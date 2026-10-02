@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -22,8 +23,8 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
     source = tmp_path / "daily.parquet"
     output_dir = tmp_path / "artifacts"
     daily.to_parquet(source, index=False)
-    start = daily.loc[50, "date"].date().isoformat()
-    end = daily.loc[55, "date"].date().isoformat()
+    start = cast(pd.Timestamp, daily.loc[50, "date"]).date().isoformat()
+    end = cast(pd.Timestamp, daily.loc[55, "date"]).date().isoformat()
 
     completed = subprocess.run(
         [

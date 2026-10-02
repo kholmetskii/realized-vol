@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rvol.domain.contracts import FloatArray
-from rvol.models.base import LinearPredictor, fit_linear_regression
+from rvol.models.linear import LinearPredictor, fit_ols
 
 
 class AR1Forecaster:
@@ -13,7 +13,7 @@ class AR1Forecaster:
     feature_names = ("rv_daily",)
 
     def fit(self, features: FloatArray, target: FloatArray) -> LinearPredictor:
-        return fit_linear_regression(
+        return fit_ols(
             features,
             target,
             n_features=len(self.feature_names),

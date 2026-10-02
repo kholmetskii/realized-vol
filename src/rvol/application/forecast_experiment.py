@@ -98,8 +98,6 @@ class WalkForwardExperiment:
                     n_train=len(training),
                     actual_log_rv=actual_log_rv,
                     predicted_log_rv=predicted_log_rv,
-                    actual_rv=float(np.exp(actual_log_rv)),
-                    predicted_rv=float(np.exp(predicted_log_rv)),
                 ))
 
         return ExperimentResult(records=tuple(records))

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from rvol.domain.contracts import FloatArray
-from rvol.models.base import FeatureColumnPredictor, validated_training_data
+from rvol.models._validation import validated_training_data
+from rvol.models.predictors import FeatureColumnPredictor
 
 
 class NaiveForecaster:

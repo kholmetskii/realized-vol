@@ -5,7 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from rvol.domain.contracts import FloatArray
-from rvol.models.base import ConstantPredictor, validated_training_data
+from rvol.models._validation import validated_training_data
+from rvol.models.predictors import ConstantPredictor
 
 
 class HistoricalMeanForecaster:
