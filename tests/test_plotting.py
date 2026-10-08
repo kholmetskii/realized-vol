@@ -205,4 +205,5 @@ def test_forecast_evaluation_plot_builds_paths_losses_and_advantage_panels():
     assert figure.axes[0].get_title() == "Forecast paths"
     assert len(figure.axes[1].patches) == 3
     assert len(figure.axes[2].lines) == 3
+    assert "HAR-RV" in figure.axes[0].get_legend_handles_labels()[1]
     plt.close(figure)

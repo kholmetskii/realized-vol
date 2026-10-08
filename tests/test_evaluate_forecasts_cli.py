@@ -14,6 +14,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
     n_sessions = 75
     step = np.arange(n_sessions, dtype="float64")
     log_rv = -10.0 + 0.25 * np.sin(step / 4) + 0.002 * step
+    log_rv += np.random.default_rng(41).normal(0.0, 0.03, n_sessions)
     daily = pd.DataFrame({
         "date": pd.bdate_range("2022-01-03", periods=n_sessions),
         "rv_5min": np.exp(log_rv),

@@ -23,6 +23,19 @@ def test_har_recovers_known_linear_coefficients():
     assert np.allclose(model.coefficients, [0.5, 0.3, 0.1])
 
 
+def test_fit_har_returns_the_arithmetic_variance_forecast():
+    features = pd.DataFrame({
+        "rv_daily": np.zeros(4),
+        "rv_weekly": np.zeros(4),
+        "rv_monthly": np.zeros(4),
+        "target": np.log([1.0, 9.0, 1.0, 9.0]),
+    })
+
+    model = fit_har(features)
+
+    np.testing.assert_allclose(np.exp(model.predict(features.iloc[:1])), [5.0])
+
+
 def test_har_predicts_multiple_rows():
     model = HarModel(intercept=1.0, daily=0.5, weekly=0.25, monthly=0.1)
     features = synthetic_regression(n=4)

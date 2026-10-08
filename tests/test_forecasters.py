@@ -102,6 +102,46 @@ def test_har_forecaster_recovers_known_coefficients_without_mutating_inputs():
     np.testing.assert_array_equal(target, original_target)
 
 
+def test_har_recovers_arithmetic_variance_mean_from_log_predictions():
+    features = np.zeros((4, 3))
+    target = np.log(np.array([1.0, 9.0, 1.0, 9.0]))
+    original_target = target.copy()
+
+    fitted = HARForecaster().fit(features, target)
+
+    np.testing.assert_allclose(np.exp(fitted.predict(features[:1])), [5.0])
+    np.testing.assert_array_equal(target, original_target)
+
+
+def test_har_preserves_regression_effects_with_multiplicative_errors():
+    rng = np.random.default_rng(31)
+    features = np.repeat(rng.normal(size=(30, 3)), 2, axis=0)
+    coefficients = np.array([0.5, 0.3, 0.1])
+    target = 0.4 + features @ coefficients + np.tile([-np.log(3), np.log(3)], 30)
+    future = rng.normal(size=(5, 3))
+
+    fitted = HARForecaster().fit(features, target)
+
+    # At each feature vector the two equally likely variances are one third
+    # and three times exp(0.4 + x @ coefficients), with arithmetic mean 5/3.
+    expected = (5 / 3) * np.exp(0.4 + future @ coefficients)
+    np.testing.assert_allclose(np.exp(fitted.predict(future)), expected)
+    np.testing.assert_allclose(fitted.coefficients, coefficients)
+
+
+def test_har_stays_finite_when_exponentiating_residuals_would_overflow():
+    features = np.zeros((12, 3))
+    target = np.array([-700.0] * 11 + [700.0])
+
+    with np.errstate(over="raise", invalid="raise"):
+        fitted = HARForecaster().fit(features, target)
+        predicted = fitted.predict(features[:1])
+        variance = np.exp(predicted)
+
+    np.testing.assert_allclose(predicted, [700 - np.log(12)])
+    assert np.isfinite(variance).all()
+
+
 def test_fitted_linear_models_are_immutable():
     daily = np.arange(5, dtype="float64").reshape(-1, 1)
     fitted = AR1Forecaster().fit(daily, daily[:, 0])

@@ -2,6 +2,7 @@
 
 These assertions intentionally lock the current end-to-end behavior. Update
 the golden values only when a numerical or alignment change is deliberate.
+HAR expectations include the variance correction from each training window.
 """
 
 import numpy as np
@@ -71,9 +72,9 @@ def test_walk_forward_pipeline_matches_current_alignment_and_predictions(
         for index in (0, 21, 42)
     ])
     expected = np.array([
-        [-9.757338569918984, -9.654409842525581, -9.812760345626966],
-        [-10.195348190910776, -10.115053704270585, -10.1806092207242],
-        [-9.968873206979659, -9.9355616903085, -10.009376565223356],
+        [-9.757338569918984, -9.654409842525581, -9.81262938523659],
+        [-10.195348190910776, -10.115053704270585, -10.18040187219842],
+        [-9.968873206979659, -9.9355616903085, -10.009187806732454],
     ])
     np.testing.assert_allclose(selected, expected, rtol=1e-10, atol=1e-10)
     np.testing.assert_allclose(
@@ -82,7 +83,7 @@ def test_walk_forward_pipeline_matches_current_alignment_and_predictions(
             sum(record.predicted_log_rv for record in naive),
             sum(record.actual_log_rv for record in har),
         ],
-        [-425.47912683545536, -424.8527856107647, -425.16724897521885],
+        [-425.4709423658551, -424.8527856107647, -425.16724897521885],
         rtol=1e-10,
         atol=1e-10,
     )
@@ -105,10 +106,10 @@ def test_statistical_comparison_matches_current_pipeline(characterized_pipeline)
         ],
         [
             0.002657592022619984,
-            0.0002929614467149504,
-            0.0023646305759050337,
-            4.77821783149408,
-            8.842786335854546e-07,
+            0.00029172650971693394,
+            0.00236586551290305,
+            4.779358110184867,
+            8.792786297935597e-07,
         ],
         rtol=1e-9,
         atol=1e-12,
@@ -127,10 +128,10 @@ def test_statistical_comparison_matches_current_pipeline(characterized_pipeline)
         ],
         [
             0.005315602810634525,
-            0.0005811821692075719,
-            0.004734420641426953,
-            4.915974016022684,
-            4.417105771101206e-07,
+            0.0005788184668746995,
+            0.004736784343759825,
+            4.916822639473957,
+            4.398008759862686e-07,
         ],
         rtol=1e-9,
         atol=1e-12,

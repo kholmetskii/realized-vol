@@ -123,6 +123,21 @@ evaluated in log space for numerical stability. Training outcomes are admitted
 only after their target dates have become observable, preventing future
 information from leaking into a forecast.
 
+`HAR` fits next-session log variance by OLS and applies Duan's residual
+correction to target mean variance:
+
+    residual_i = actual_log_rv_i - fitted_log_rv_i
+    log_correction = log(mean(exp(residual_i)))
+    predicted_log_rv = OLS_log_forecast + log_correction
+    predicted_rv = exp(predicted_log_rv)
+
+The correction uses only residuals from the eligible training window and is
+recomputed before every forecast. A log-sum-exp calculation avoids overflowing
+the exponentials. The correction assumes that the training residual distribution
+represents current forecast uncertainty, so it can improve QLIKE while worsening
+log-MSE. It is part of the single `HAR` implementation, shared by
+`HARForecaster` and the DataFrame convenience function `fit_har`.
+
 Run the complete out-of-sample comparison with:
 
     python scripts/evaluate_forecasts.py \
@@ -174,8 +189,9 @@ Run the offline quality checks with:
 ## Results
 
 The archived results below are the original four-model Q1 2024 experiment,
-before EWMA was added. Evaluation on an already inspected period is exploratory
-rather than a fresh confirmatory test.
+before EWMA and HAR's variance correction were added. Run the workflow above
+for results from the current implementation. Evaluation on an already inspected
+period is exploratory rather than a fresh confirmatory test.
 
 ### 1. How far can you sample before noise takes over?
 

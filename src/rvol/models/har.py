@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
+from scipy.special import logsumexp
 
 from rvol.domain.contracts import FloatArray
 from rvol.models.linear import LinearPredictor, fit_ols
@@ -27,7 +28,7 @@ def _feature_matrix(frame: pd.DataFrame) -> NDArray[np.float64]:
 
 @dataclass(frozen=True)
 class HarModel:
-    """OLS coefficients for a log realized-variance HAR model."""
+    """Fitted HAR slopes and a variance-corrected log-scale intercept."""
 
     intercept: float
     daily: float
@@ -39,27 +40,38 @@ class HarModel:
         return np.array([self.daily, self.weekly, self.monthly], dtype="float64")
 
     def predict(self, features: pd.DataFrame) -> NDArray[np.float64]:
-        """Predict log realized variance for one or more feature rows."""
+        """Return the log of the variance forecast for each feature row."""
         matrix = _feature_matrix(features)
         return self.intercept + matrix @ self.coefficients
 
 
 class HARForecaster:
-    """Fit daily, weekly, and monthly log-RV components by OLS."""
+    """Fit log HAR-RV by OLS and apply Duan's training-residual correction.
+
+    Return the log of the variance-scale forecast: the OLS log prediction plus
+    log(mean(exp(training residuals))). The correction estimates mean variance
+    when the training residual distribution represents forecast uncertainty.
+    It is recomputed from each expanding training window, without using the
+    current or future forecast outcomes.
+    """
 
     name = "HAR"
     feature_names = HAR_FEATURES
 
     def fit(self, features: FloatArray, target: FloatArray) -> LinearPredictor:
-        return fit_ols(
-            features,
-            target,
-            n_features=len(self.feature_names),
+        fitted = fit_ols(features, target, n_features=len(self.feature_names))
+        residuals = np.asarray(target, dtype="float64") - fitted.predict(features)
+        # Stay in log space: exponentiating large residuals can overflow even
+        # when the final corrected variance is representable.
+        log_correction = float(logsumexp(residuals) - np.log(len(residuals)))
+        return LinearPredictor(
+            intercept=fitted.intercept + log_correction,
+            coefficients=fitted.coefficients,
         )
 
 
 def fit_har(features: pd.DataFrame, *, target_col: str = "target") -> HarModel:
-    """Fit a log HAR-RV regression by ordinary least squares."""
+    """Fit HAR-RV by OLS with the training-residual variance correction."""
     matrix = _feature_matrix(features)
     if target_col not in features:
         raise ValueError(f"HAR data is missing target column: {target_col}")

@@ -20,6 +20,7 @@ def feature_sample(n: int = 45, seed: int = 19) -> pd.DataFrame:
     dates = pd.bdate_range("2022-01-03", periods=n + 1)
     matrix = rng.normal(loc=-10.0, scale=0.5, size=(n, 3))
     target = -0.4 + matrix @ np.array([0.5, 0.3, 0.15])
+    target += rng.normal(scale=0.1, size=n)
     return pd.DataFrame({
         "origin_date": dates[:-1],
         "target_date": dates[1:],
