@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import argparse
 
-from rvol.cli._arguments import iso_date
+from rvol.cli._arguments import add_forecast_arguments, experiment_config_from_args
 from rvol.composition import standard_experiment_definition
-from rvol.domain import ExperimentConfig
 from rvol.infrastructure import ParquetDatasetRepository
 from rvol.reporting import RobustnessArtifactWriter
 
@@ -14,9 +13,7 @@ from rvol.reporting import RobustnessArtifactWriter
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("daily", help="daily realized-variance Parquet dataset")
-    parser.add_argument("--min-train-size", type=int, default=ExperimentConfig().min_train_size)
-    parser.add_argument("--forecast-start", type=iso_date)
-    parser.add_argument("--forecast-end", type=iso_date)
+    add_forecast_arguments(parser)
     parser.add_argument("--max-hac-lag", type=int, default=5)
     parser.add_argument("--top-errors", type=int, default=5)
     parser.add_argument(
@@ -28,17 +25,11 @@ def main() -> None:
         parser.error("--max-hac-lag must be non-negative")
     if args.top_errors < 1:
         parser.error("--top-errors must be positive")
+    config = experiment_config_from_args(parser, args)
 
     definition = standard_experiment_definition()
     daily = ParquetDatasetRepository(args.daily).load()
-    experiment = definition.run(
-        daily,
-        ExperimentConfig(
-            min_train_size=args.min_train_size,
-            forecast_start=args.forecast_start,
-            forecast_end=args.forecast_end,
-        ),
-    )
+    experiment = definition.run(daily, config)
     if not experiment.records:
         raise SystemExit("no forecasts: add more data or lower --min-train-size")
 

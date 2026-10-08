@@ -93,6 +93,20 @@ class ForecastArtifactWriter:
             raise ValueError("experiment must contain forecast records")
         if sorted(model.name for model in specification.models) != list(experiment.models):
             raise ValueError("model specifications must match the forecast models")
+        if experiment.config != config:
+            raise ValueError("artifact configuration must match the completed experiment")
+        execution = experiment.execution_specification
+        if execution is None or experiment.strategy_anchor is None:
+            raise ValueError("experiment must include execution metadata")
+        if execution != config.strategy.specification:
+            raise ValueError("execution specification must match the completed experiment")
+        if any(record.fit_date is None for record in experiment.records):
+            raise ValueError("forecast records must include fit dates and training boundaries")
+        if any(
+            record.fit_date is not None and record.fit_date < experiment.strategy_anchor
+            for record in experiment.records
+        ):
+            raise ValueError("fit dates must not precede the strategy anchor")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         paths = ForecastArtifactPaths(
             forecasts=self.output_dir / "forecasts.csv",
@@ -112,6 +126,9 @@ class ForecastArtifactWriter:
                     "predicted_log_rv": record.predicted_log_rv,
                     "actual_rv": record.actual_rv,
                     "predicted_rv": record.predicted_rv,
+                    "fit_date": record.fit_date,
+                    "train_start_date": record.train_start_date,
+                    "train_end_date": record.train_end_date,
                 }
                 for record in experiment.records
             ),
@@ -135,6 +152,9 @@ class ForecastArtifactWriter:
             "predicted_log_rv",
             "actual_rv",
             "predicted_rv",
+            "fit_date",
+            "train_start_date",
+            "train_end_date",
         ]
         summary_columns = ["model", "metric", "n_obs", "mean_loss"]
         comparison_columns = [
@@ -166,7 +186,15 @@ class ForecastArtifactWriter:
         if len(hac_lags) > 1:
             raise ValueError("comparisons must use one common HAC lag setting")
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
+            "execution": {
+                "implementation": execution.implementation,
+                "training_window": _component_payload(execution.training_window),
+                "retrain": _component_payload(execution.retrain),
+                "schedule_anchor": experiment.strategy_anchor.isoformat(),
+                "schedule_anchor_policy": "first_eligible_origin",
+                "observation_update_policy": "newly_available_targets_between_refits",
+            },
             "specification": {
                 "features": _component_payload(specification.features),
                 "models": [

@@ -7,13 +7,29 @@ from rvol.domain.contracts import (
     FittedForecaster,
     Forecaster,
     ForecastMetric,
+    RefitSchedule,
+    TrainingWindowPolicy,
+    UpdatablePredictor,
+)
+from rvol.domain.policies import (
+    EveryNSessions,
+    ExpandingWindow,
+    RollingWindow,
+    WalkForwardStrategy,
 )
 from rvol.domain.results import ExperimentResult, ForecastRecord
-from rvol.domain.specifications import ComponentSpecification, ExperimentSpecification
+from rvol.domain.specifications import (
+    ComponentSpecification,
+    ExecutionSpecification,
+    ExperimentSpecification,
+)
 
 __all__ = [
     "ComponentSpecification",
     "DatasetRepository",
+    "EveryNSessions",
+    "ExecutionSpecification",
+    "ExpandingWindow",
     "ExperimentConfig",
     "ExperimentResult",
     "ExperimentSpecification",
@@ -22,4 +38,9 @@ __all__ = [
     "Forecaster",
     "ForecastMetric",
     "ForecastRecord",
+    "RefitSchedule",
+    "RollingWindow",
+    "TrainingWindowPolicy",
+    "UpdatablePredictor",
+    "WalkForwardStrategy",
 ]

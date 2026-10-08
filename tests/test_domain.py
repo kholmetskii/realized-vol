@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import date
 from typing import Any, cast
 
@@ -14,6 +14,8 @@ from rvol.domain import (
     Forecaster,
     ForecastMetric,
     ForecastRecord,
+    RollingWindow,
+    WalkForwardStrategy,
 )
 
 
@@ -144,3 +146,18 @@ def test_forecast_record_rejects_invalid_domain_values(changes, message):
 
     with pytest.raises(ValueError, match=message):
         ForecastRecord(**cast(Any, values))
+
+
+def test_minimum_training_size_cannot_exceed_window_capacity():
+    with pytest.raises(ValueError, match="window size must be at least min_train_size"):
+        ExperimentConfig(min_train_size=20, strategy=WalkForwardStrategy(RollingWindow(10)))
+
+
+def test_forecast_fit_dates_must_be_complete_and_precede_the_origin():
+    with pytest.raises(ValueError, match="provided together"):
+        replace(sample_record(), fit_date=date(2024, 1, 2))
+    with pytest.raises(ValueError, match="boundaries must precede"):
+        replace(
+            sample_record(), fit_date=date(2024, 1, 3),
+            train_start_date=date(2024, 1, 1), train_end_date=date(2024, 1, 2),
+        )

@@ -1,12 +1,25 @@
 import json
 import subprocess
 import sys
+from datetime import date
+from importlib import import_module
 from pathlib import Path
 from typing import cast
 
 import numpy as np
 import pandas as pd
 import pytest
+
+from rvol.composition import standard_experiment_definition
+from rvol.domain import (
+    EveryNSessions,
+    ExpandingWindow,
+    ExperimentConfig,
+    ExperimentResult,
+    RollingWindow,
+    WalkForwardStrategy,
+)
+from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter, RobustnessArtifactWriter
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -107,11 +120,37 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
         "predicted_log_rv",
         "actual_rv",
         "predicted_rv",
+        "fit_date",
+        "train_start_date",
+        "train_end_date",
     ]
     assert len(forecasts) == 30
     assert len(summaries) == 10
     assert len(comparisons) == 2 * len(expected_pairs)
-    assert metadata["schema_version"] == 2
+    assert metadata["schema_version"] == 3
+    assert metadata["execution"] == {
+        "implementation": "rvol.domain.policies.WalkForwardStrategy",
+        "training_window": {
+            "name": "expanding",
+            "implementation": "rvol.domain.policies.ExpandingWindow",
+            "feature_names": [],
+            "parameters": {},
+        },
+        "retrain": {
+            "name": "every_n_sessions",
+            "implementation": "rvol.domain.policies.EveryNSessions",
+            "feature_names": [],
+            "parameters": {"interval": 1},
+        },
+        "schedule_anchor": cast(pd.Timestamp, daily.loc[41, "date"]).date().isoformat(),
+        "schedule_anchor_policy": "first_eligible_origin",
+        "observation_update_policy": "newly_available_targets_between_refits",
+    }
+    assert forecasts["fit_date"].equals(forecasts["origin_date"])
+    assert forecasts["train_end_date"].equals(forecasts["origin_date"])
+    assert set(forecasts["train_start_date"]) == {
+        cast(pd.Timestamp, daily.loc[22, "date"]).date().isoformat(),
+    }
     assert metadata["dataset"]["rows"] == n_sessions
     assert len(metadata["dataset"]["sha256"]) == 64
     assert metadata["experiment"] == {
@@ -161,6 +200,46 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
     } == first_run
 
 
+@pytest.mark.parametrize("training_window", ["expanding", "rolling"])
+def test_forecast_cli_strategy_matches_the_python_run(tmp_path, daily_dataset, training_window):
+    source, daily = daily_dataset
+    output = tmp_path / "artifacts"
+    start = cast(pd.Timestamp, daily.loc[50, "date"]).date()
+    end = cast(pd.Timestamp, daily.loc[55, "date"]).date()
+    window_args = ["--window-size", "25"] if training_window == "rolling" else []
+    completed = subprocess.run(
+        [
+            sys.executable, "scripts/evaluate_forecasts.py", str(source),
+            "--min-train-size", "20", "--training-window", training_window, *window_args,
+            "--retrain-every", "5", "--forecast-start", start.isoformat(),
+            "--forecast-end", end.isoformat(), "--output-dir", str(output),
+        ],
+        cwd=PROJECT_ROOT, check=False, capture_output=True, text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    definition = standard_experiment_definition()
+    config = ExperimentConfig(
+        min_train_size=20, forecast_start=start, forecast_end=end,
+        strategy=WalkForwardStrategy(
+            RollingWindow(25) if training_window == "rolling" else ExpandingWindow(),
+            EveryNSessions(5),
+        ),
+    )
+    experiment = definition.run(daily, config)
+    expected = ForecastArtifactWriter(tmp_path / "expected").write(
+        experiment, definition.evaluator().evaluate(experiment), config=config,
+        dataset=DatasetSnapshot.from_frame(source, daily), specification=definition.specification,
+    )
+    assert {path.name: path.read_bytes() for path in expected.all()} == {
+        path.name: (output / path.name).read_bytes() for path in expected.all()
+    }
+    forecasts = pd.read_csv(output / "forecasts.csv")
+    assert forecasts["fit_date"].nunique() == 2
+    assert (forecasts["fit_date"] < forecasts["origin_date"]).any()
+    assert set(forecasts["n_train"]) == ({25} if training_window == "rolling" else {25, 30})
+
+
 @pytest.mark.parametrize("metric", [None, "log-RV MSE"], ids=["default_metric", "log_mse"])
 def test_plot_cli_uses_the_shared_experiment_and_metric_choices(tmp_path, daily_dataset, metric):
     source, _ = daily_dataset
@@ -182,18 +261,54 @@ def test_plot_cli_uses_the_shared_experiment_and_metric_choices(tmp_path, daily_
     assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
-def test_robustness_cli_uses_shared_baselines_and_preserves_option_overrides(
-    tmp_path, daily_dataset,
+def test_plot_cli_passes_the_requested_strategy_forecasts_to_the_plot(
+    tmp_path, daily_dataset, monkeypatch,
 ):
-    source, _ = daily_dataset
+    from rvol.cli import forecast_plots
+
+    source, daily = daily_dataset
+    output = tmp_path / "rolling.png"
+    expected = standard_experiment_definition().run(daily, ExperimentConfig(
+        min_train_size=20, forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
+        strategy=WalkForwardStrategy(RollingWindow(25), EveryNSessions(5)),
+    ))
+    captured: list[ExperimentResult] = []
+    plot = forecast_plots.plot_forecast_evaluation
+
+    def capture(experiment, *args, **kwargs):
+        captured.append(experiment)
+        return plot(experiment, *args, **kwargs)
+
+    monkeypatch.setattr(forecast_plots, "plot_forecast_evaluation", capture)
+    monkeypatch.setattr(sys, "argv", [
+        "forecast_plots", str(source), "--min-train-size", "20",
+        "--training-window", "rolling", "--window-size", "25", "--retrain-every", "5",
+        "--forecast-start", "2022-03-14", "--forecast-end", "2022-03-21", "--out", str(output),
+    ])
+
+    forecast_plots.main()
+
+    assert captured == [expected]
+    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+@pytest.mark.parametrize("rolling", [False, True], ids=["default", "rolling_refit"])
+def test_robustness_cli_uses_shared_baselines_and_preserves_option_overrides(
+    tmp_path, daily_dataset, rolling,
+):
+    source, daily = daily_dataset
     output = tmp_path / "robustness"
+    strategy_args = (
+        ["--training-window", "rolling", "--window-size", "25", "--retrain-every", "5"]
+        if rolling else []
+    )
 
     completed = subprocess.run(
         [
             sys.executable, "scripts/robustness_report.py", str(source),
             "--min-train-size", "20", "--forecast-start", "2022-03-14",
             "--forecast-end", "2022-03-21", "--max-hac-lag", "1",
-            "--top-errors", "2", "--output-dir", str(output),
+            "--top-errors", "2", "--output-dir", str(output), *strategy_args,
         ],
         cwd=PROJECT_ROOT, check=False, capture_output=True, text=True,
     )
@@ -207,3 +322,32 @@ def test_robustness_cli_uses_shared_baselines_and_preserves_option_overrides(
     assert set(comparisons["baseline_model"]) == {"naive", "EWMA", "AR1", "historical_mean"}
     assert len(pd.read_csv(output / "largest_errors.csv")) == 10
     assert len(pd.read_csv(output / "win_rates.csv")) == 8
+
+    if rolling:
+        definition = standard_experiment_definition()
+        experiment = definition.run(daily, ExperimentConfig(
+            min_train_size=20, forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
+            strategy=WalkForwardStrategy(RollingWindow(25), EveryNSessions(5)),
+        ))
+        expected = RobustnessArtifactWriter(tmp_path / "expected").write(
+            definition.robustness_analyzer(hac_lags=(0, 1), top_errors=2).analyze(experiment),
+        )
+        assert {path.name: path.read_bytes() for path in expected.all()} == {
+            path.name: (output / path.name).read_bytes() for path in expected.all()
+        }
+
+
+@pytest.mark.parametrize("module", ["evaluate_forecasts", "forecast_plots", "robustness_report"])
+def test_all_forecast_commands_validate_execution_options_before_loading_data(
+    tmp_path, monkeypatch, capsys, module,
+):
+    command = import_module(f"rvol.cli.{module}")
+    monkeypatch.setattr(sys, "argv", [
+        module, str(tmp_path / "missing.parquet"), "--training-window", "rolling",
+    ])
+
+    with pytest.raises(SystemExit) as error:
+        command.main()
+
+    assert error.value.code == 2
+    assert "--window-size is required" in capsys.readouterr().err

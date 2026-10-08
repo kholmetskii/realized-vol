@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import argparse
 
-from rvol.cli._arguments import iso_date
+from rvol.cli._arguments import add_forecast_arguments, experiment_config_from_args
 from rvol.composition import standard_experiment_definition
-from rvol.domain import ExperimentConfig
 from rvol.infrastructure import ParquetDatasetRepository
 from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
 
@@ -14,9 +13,7 @@ from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("daily", help="daily realized-variance Parquet dataset")
-    parser.add_argument("--min-train-size", type=int, default=ExperimentConfig().min_train_size)
-    parser.add_argument("--forecast-start", type=iso_date, help="first target date to evaluate")
-    parser.add_argument("--forecast-end", type=iso_date, help="last target date to evaluate")
+    add_forecast_arguments(parser)
     parser.add_argument("--hac-lags", type=int)
     parser.add_argument(
         "--output-dir",
@@ -30,14 +27,10 @@ def main() -> None:
         help="one-sided comparison that CANDIDATE has lower loss; may be repeated",
     )
     args = parser.parse_args()
+    config = experiment_config_from_args(parser, args)
 
     definition = standard_experiment_definition()
     daily = ParquetDatasetRepository(args.daily).load()
-    config = ExperimentConfig(
-        min_train_size=args.min_train_size,
-        forecast_start=args.forecast_start,
-        forecast_end=args.forecast_end,
-    )
     specification = definition.specification
     experiment_result = definition.run(daily, config)
     if not experiment_result.records:

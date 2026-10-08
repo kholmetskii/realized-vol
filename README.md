@@ -58,10 +58,10 @@ the two, while higher layers consume the resulting daily quantities. Forecast
 models implement the domain `Forecaster` protocol, and Parquet persistence
 implements `DatasetRepository`; neither is hard-coded into the experiment.
 
-To add a model, implement `name`, `feature_names`, and `fit`, then inject the
-new object into `WalkForwardExperiment`. The experiment and evaluator do not
-need model-specific branches. Tests enforce the dependency direction so an
-inner layer cannot accidentally import an outer adapter.
+To add a model, implement `name`, `feature_names`, `specification`, and `fit`,
+then inject the new object into `WalkForwardExperiment`. The experiment and
+evaluator do not need model-specific branches. Tests enforce the dependency
+direction so an inner layer cannot accidentally import an outer adapter.
 
 All models share one array-based interface: `fit(features, target)` returns a
 fitted object with `predict(features)`. Features are two-dimensional arrays
@@ -125,6 +125,92 @@ models before running an experiment. Custom components describe their own
 settings; reporting depends on these domain values rather than importing
 concrete models or duplicating their defaults. Direct `ForecastArtifactWriter`
 calls now require this snapshot as the `specification` keyword argument.
+
+Execution policies select the strategy used by a walk-forward run:
+
+    from rvol.composition import standard_experiment_definition
+    from rvol.domain import EveryNSessions, ExperimentConfig, RollingWindow, WalkForwardStrategy
+
+    strategy = WalkForwardStrategy(
+        training_window=RollingWindow(size=504),
+        retrain=EveryNSessions(5),
+    )
+    config = ExperimentConfig(min_train_size=252, strategy=strategy)
+    definition = standard_experiment_definition()
+    experiment = definition.run(daily, config)
+
+`TrainingWindowPolicy.select(n_available)` returns a slice of chronological,
+already eligible training rows. `ExpandingWindow` selects all of them;
+`RollingWindow` selects up to its configured size. Sizes count observations.
+`RefitSchedule.should_refit(eligible_origin_index)` counts forecast origins
+starting at zero for the first origin meeting the training requirement.
+`EveryNSessions(5)` is due at indices 0, 5, 10, and so on, using indices from
+the full dataset even when only a later date range is reported. Calendar gaps
+do not advance the count. `WalkForwardStrategy()` defaults to expanding
+history and refitting every session.
+
+Fitted models may additionally implement `UpdatablePredictor`. Its
+`update(features, target)` method consumes new observations in chronological
+order and returns updated state, preserving its parameters, the previous
+predictor and the input arrays. Targets are observed log realized variances;
+the caller ensures availability and supplies each observation once. Empty
+batches preserve the state. EWMA implements this capability with the same
+variance-scale recursion used by `fit`; other fitted models retain the common
+`predict` interface. Fitting EWMA again initializes its state from the supplied
+training window.
+
+The runner starts once the selected window meets `min_train_size`, growing a
+rolling window up to its configured size. Set the minimum equal to the window
+size to require a full window from the first fit. A bounded window must be at
+least the minimum training size. Without a strategy override, runs retain
+expanding history and daily refitting.
+
+Between refits, HAR and AR1 reuse their fitted coefficients with fresh features,
+and HAR retains its fitted smearing correction. EWMA consumes only newly
+available targets, once each; a refit rebuilds its state from the selected
+window. Both fitting and updates use outcomes with `target_date <= origin_date`.
+Reporting bounds preserve the global schedule: the runner initializes from
+the last scheduled fit before the requested range and applies subsequent
+updates before reporting its first forecast. All fitted state belongs to one
+run. Origin dates must advance strictly in chronological order.
+
+Forecast records carry `fit_date`, `train_start_date`, and `train_end_date`.
+Training boundaries refer to target dates in the last fit, and `n_train` is
+the count used by that fit, including when the model is reused or updated.
+`ExperimentResult` also retains the run configuration and the first eligible
+origin as `strategy_anchor`. Its immutable `execution_specification` snapshots
+the strategy and both policies before execution. Custom window and refit
+policies supply a `specification` property describing their implementation and
+settings.
+
+The evaluation, forecast-plot and robustness commands share these options,
+including their installed `rvol-*` equivalents:
+
+| Option | Meaning | Default |
+|---|---|---|
+| `--training-window expanding` or `rolling` | History selected at each fit | `expanding` |
+| `--window-size N` | Maximum training observations for a rolling window | Required for `rolling` |
+| `--retrain-every N` | Refit every N eligible forecast sessions | `1` |
+
+For example, use up to 504 training observations and refit every fifth eligible
+session with:
+
+    python scripts/evaluate_forecasts.py \
+        data/derived/EURUSD_daily_rv_5min.parquet \
+        --min-train-size 252 \
+        --training-window rolling \
+        --window-size 504 \
+        --retrain-every 5 \
+        --forecast-start 2025-01-01 \
+        --forecast-end 2026-09-30 \
+        --output-dir outputs/rolling_504_refit_5
+
+Pass the same training and date options to `scripts/forecast_plots.py` or
+`scripts/robustness_report.py` to use the same forecasts in their outputs.
+`--window-size` requires `--training-window rolling` and must be at least
+`--min-train-size`. Counts and intervals must be positive integers. Invalid
+options and reversed date bounds produce usage errors before loading the data.
+Omitting the new options preserves expanding history and daily refitting.
 
 ## Reproduce the plots
 
@@ -233,14 +319,23 @@ difference favours the candidate.
 When `--output-dir` is provided, the same run also writes normalized forecasts,
 mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
 records dataset coverage and a SHA-256 fingerprint so the exact input can be
-verified later. JSON schema version 2 also records a `specification` object
+verified later. JSON schema version 3 records a `specification` object
 containing the feature builder and each model's implementation, ordered feature
 names and settings, including EWMA decay and HAR's training-residual smearing
 correction. HAR windows count observed sessions; `max_gap_days` is a calendar-day
 gap limit. These are configured settings, rather than fitted coefficients.
-Existing metadata fields and CSV layouts are preserved; readers that check
-`schema_version` must accept version 2. Repeating an unchanged run produces
-byte-identical artifacts.
+The `execution` object records the strategy implementation, training-window
+and refit settings, the full dataset's schedule anchor, and the rule for updating
+state between refits. `forecasts.csv` appends `fit_date`, `train_start_date`, and
+`train_end_date`; its existing columns retain their order. The training count
+and boundaries describe the last actual fit, even when a predictor has since
+consumed new observations. Loss and comparison CSV layouts are unchanged.
+Readers that check `schema_version` must accept version 3. Repeating an unchanged
+run produces byte-identical artifacts.
+
+The artifact writer requires a completed runner result with its execution
+snapshot and fit boundaries. It rejects configuration or strategy metadata
+that differs from the completed run before creating output files.
 
 Run the fixed robustness checks without changing the model specifications:
 
