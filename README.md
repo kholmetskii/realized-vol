@@ -16,7 +16,7 @@ with error?
     src/rvol/domain/       immutable configuration, results, and protocols
     src/rvol/application/  model-agnostic walk-forward use cases
     src/rvol/cli/          packaged command-line entry points
-    src/rvol/composition/  standard model and feature assembly
+    src/rvol/composition/  experiment components and comparison defaults
     src/rvol/models/       interchangeable volatility forecasting models
     src/rvol/evaluation/   loss metrics and statistical model comparison
     src/rvol/reporting/    deterministic experiment artifacts
@@ -38,7 +38,8 @@ The forecasting dependency direction points toward stable contracts:
     cli (scripts delegate here)
        ├── composition ─┬──> application ──> domain
        │               ├──> models ────────> domain
-       │               └──> features
+       │               ├──> features ──────> domain
+       │               └──> evaluation ──> domain
        ├── evaluation ────────────────> domain
        ├── reporting ──> evaluation + domain
        └── infrastructure
@@ -61,6 +62,69 @@ To add a model, implement `name`, `feature_names`, and `fit`, then inject the
 new object into `WalkForwardExperiment`. The experiment and evaluator do not
 need model-specific branches. Tests enforce the dependency direction so an
 inner layer cannot accidentally import an outer adapter.
+
+All models share one array-based interface: `fit(features, target)` returns a
+fitted object with `predict(features)`. Features are two-dimensional arrays
+with columns in `model.feature_names` order; training targets are
+one-dimensional arrays of observed log realised variance. Both operations
+leave their inputs unchanged. Predictions are one-dimensional arrays with one
+finite log variance per row, representing finite positive variances after
+exponentiation.
+
+The HAR-specific `fit_har` function and `HarModel` DataFrame wrapper have been
+removed. Convert DataFrames to arrays at the call site and use the common API:
+
+    from rvol.models import HARForecaster
+
+    model = HARForecaster()
+    columns = list(model.feature_names)
+    fitted = model.fit(
+        training.loc[:, columns].to_numpy(dtype="float64"),
+        training["target"].to_numpy(dtype="float64"),
+    )
+    predicted_log_rv = fitted.predict(current.loc[:, columns].to_numpy(dtype="float64"))
+
+Fitted coefficients are available as `fitted.intercept` and
+`fitted.coefficients`, with slopes in `model.feature_names` order.
+
+The standard commands share an `ExperimentDefinition` from
+`rvol.composition.standard_experiment_definition`. It selects the feature
+builder, models, metrics, evaluation comparison pairs, plot candidate, and
+robustness baselines together. Construct a different definition to use other
+features, models, metrics, or comparison choices:
+
+    from rvol.composition import standard_experiment_definition
+    from rvol.domain import ExperimentConfig
+
+    definition = standard_experiment_definition()
+    experiment = definition.run(daily, ExperimentConfig(min_train_size=252))
+    evaluation = definition.evaluator().evaluate(experiment)
+
+Evaluation keeps the default naive-versus-HAR comparison and accepts ordered
+`--compare` overrides. Plots compare all other models with the configured
+candidate. Robustness uses the definition's ordered baseline list, with the
+requested HAC lags and top-error count. The existing
+`run_standard_forecast_experiment` helper delegates to the same definition.
+
+Direct `ForecastEvaluator` calls calculate loss summaries without implicit
+model comparisons; pass `comparison_pairs` explicitly when needed. Direct
+`ForecastRobustnessAnalyzer` and `plot_forecast_evaluation` calls require their
+candidate (and robustness baselines) explicitly. These numerical and plotting
+components do not select the project's model names.
+
+Models and feature builders expose an immutable `ComponentSpecification` with
+an implementation identifier, ordered feature names and scalar settings.
+`Forecaster.specification` is part of the model contract;
+`FeatureBuilder[pd.DataFrame]` describes a callable with the same property.
+`HARFeatureBuilder` binds its column names, rolling windows and gap policy to
+both feature preparation and metadata. The `build_har_features` function
+remains available with the same defaults and arguments.
+
+Use `definition.specification` to snapshot the selected feature builder and
+models before running an experiment. Custom components describe their own
+settings; reporting depends on these domain values rather than importing
+concrete models or duplicating their defaults. Direct `ForecastArtifactWriter`
+calls now require this snapshot as the `specification` keyword argument.
 
 ## Reproduce the plots
 
@@ -135,8 +199,17 @@ The correction uses only residuals from the eligible training window and is
 recomputed before every forecast. A log-sum-exp calculation avoids overflowing
 the exponentials. The correction assumes that the training residual distribution
 represents current forecast uncertainty, so it can improve QLIKE while worsening
-log-MSE. It is part of the single `HAR` implementation, shared by
-`HARForecaster` and the DataFrame convenience function `fit_har`.
+log-MSE. It is part of the single `HARForecaster.fit` implementation.
+
+The common output scale does not imply a common statistical target:
+
+| Model | Meaning of the forecast after exponentiating its log output |
+|---|---|
+| Historical mean | Geometric mean of training realised variances |
+| Naïve | Current session's realised variance |
+| EWMA | Exponentially weighted average of past realised variances |
+| AR(1) | Geometric-mean variance forecast from the log regression |
+| HAR | Mean-variance estimate using the training-residual correction |
 
 Run the complete out-of-sample comparison with:
 
@@ -160,7 +233,14 @@ difference favours the candidate.
 When `--output-dir` is provided, the same run also writes normalized forecasts,
 mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
 records dataset coverage and a SHA-256 fingerprint so the exact input can be
-verified later. Repeating an unchanged run produces byte-identical artifacts.
+verified later. JSON schema version 2 also records a `specification` object
+containing the feature builder and each model's implementation, ordered feature
+names and settings, including EWMA decay and HAR's training-residual smearing
+correction. HAR windows count observed sessions; `max_gap_days` is a calendar-day
+gap limit. These are configured settings, rather than fitted coefficients.
+Existing metadata fields and CSV layouts are preserved; readers that check
+`schema_version` must accept version 2. Repeating an unchanged run produces
+byte-identical artifacts.
 
 Run the fixed robustness checks without changing the model specifications:
 

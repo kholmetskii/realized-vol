@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.features.forecasting import build_har_features
+from rvol.domain import FeatureBuilder
+from rvol.features.forecasting import HARFeatureBuilder, build_har_features
 
 
 def daily_sample(n_sessions: int = 35) -> pd.DataFrame:
@@ -78,3 +79,26 @@ def test_large_gap_is_rejected_before_rolling_features_are_built():
 
     with pytest.raises(ValueError, match=r"\d+-day gap"):
         build_har_features(daily)
+
+
+def test_configured_builder_uses_the_windows_and_columns_it_describes():
+    daily = daily_sample(8).rename(columns={"date": "session", "log_rv": "value"})
+    builder = HARFeatureBuilder(
+        date_col="session", rv_col="value", weekly_window=2,
+        monthly_window=4, max_gap_days=None,
+    )
+
+    features = builder(daily)
+    settings = dict(builder.specification.parameters)
+
+    assert isinstance(builder, FeatureBuilder)
+    assert settings == {
+        "date_col": "session", "rv_col": "value", "weekly_window": 2,
+        "monthly_window": 4, "max_gap_days": None,
+    }
+    assert len(features) == 4
+    assert features.loc[0, "origin_date"] == daily.loc[3, "session"]
+    assert features.loc[0, "target_date"] == daily.loc[4, "session"]
+    assert features.loc[0, "target"] == daily.loc[4, "value"]
+    assert features.loc[0, "rv_weekly"] == pytest.approx(daily.loc[2:3, "value"].mean())
+    assert features.loc[0, "rv_monthly"] == pytest.approx(daily.loc[:3, "value"].mean())

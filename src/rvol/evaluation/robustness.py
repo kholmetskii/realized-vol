@@ -66,10 +66,8 @@ class ForecastRobustnessAnalyzer:
     def __init__(
         self,
         *,
-        candidate_model: str = "HAR",
-        baseline_models: Sequence[str] = (
-            "naive", "EWMA", "AR1", "historical_mean",
-        ),
+        candidate_model: str,
+        baseline_models: Sequence[str],
         metrics: Sequence[ForecastMetric] | None = None,
         hac_lags: Sequence[int] = tuple(range(6)),
         top_errors: int = 5,

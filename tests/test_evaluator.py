@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from typing import Any, cast
 
@@ -55,7 +56,9 @@ def experiment_result(
 
 
 def test_evaluator_calculates_both_metrics_for_every_model():
-    evaluation = ForecastEvaluator(hac_lags=3).evaluate(experiment_result())
+    evaluation = ForecastEvaluator(
+        comparison_pairs=(("naive", "HAR"),), hac_lags=3,
+    ).evaluate(experiment_result())
 
     assert len(evaluation.losses) == 300
     assert len(evaluation.summaries) == 10
@@ -90,6 +93,20 @@ def test_evaluator_supports_additional_pairwise_comparisons():
         (comparison.baseline_model, comparison.candidate_model)
         for comparison in evaluation.comparisons
     } == {("naive", "HAR"), ("AR1", "HAR")}
+
+
+def test_evaluator_scores_arbitrary_models_without_assuming_comparison_names():
+    experiment = ExperimentResult(records=tuple(
+        replace(record, model="custom")
+        for record in experiment_result().records
+        if record.model == "HAR"
+    ))
+
+    evaluation = ForecastEvaluator().evaluate(experiment)
+
+    assert len(evaluation.losses) == 60
+    assert {summary.model for summary in evaluation.summaries} == {"custom"}
+    assert evaluation.comparisons == ()
 
 
 def test_validation_and_test_evaluations_remain_date_disjoint():

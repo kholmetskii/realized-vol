@@ -37,7 +37,9 @@ def characterized_pipeline():
         models=(NaiveForecaster(), HARForecaster()),
         config=ExperimentConfig(min_train_size=25),
     ).run(features)
-    evaluation = ForecastEvaluator(hac_lags=3).evaluate(experiment)
+    evaluation = ForecastEvaluator(
+        comparison_pairs=(("naive", "HAR"),), hac_lags=3,
+    ).evaluate(experiment)
     return features, experiment, evaluation
 
 

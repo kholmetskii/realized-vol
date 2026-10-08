@@ -7,6 +7,8 @@ from typing import Literal, Protocol, TypeVar, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
+from rvol.domain.specifications import ComponentSpecification
+
 FloatArray = NDArray[np.float64]
 ForecastScale = Literal["log_variance", "variance"]
 Dataset = TypeVar("Dataset")
@@ -14,14 +16,31 @@ Dataset = TypeVar("Dataset")
 
 @runtime_checkable
 class FittedForecaster(Protocol):
-    """A fitted model capable of predicting from a numerical feature matrix."""
+    """A fitted model returning forecasts in the canonical log-variance scale.
 
-    def predict(self, features: FloatArray) -> FloatArray: ...
+    Predictions use the feature order declared by the originating forecaster.
+    Log variance is the output representation, not necessarily the statistical
+    target: log(mean variance) and mean(log variance) are different forecasts.
+    Each model documents which quantity its fitting procedure estimates.
+    """
+
+    def predict(self, features: FloatArray) -> FloatArray:
+        """Return one finite log variance per row without modifying features.
+
+        The result has shape (n_rows,); exponentiating each value must yield
+        a finite positive variance.
+        """
+        ...
 
 
 @runtime_checkable
 class Forecaster(Protocol):
-    """An unfitted forecasting strategy used by a walk-forward experiment."""
+    """Fit a forecasting strategy using numerical arrays without mutating them.
+
+    Features have shape (n_rows, n_features), with columns in feature_names
+    order. Targets have shape (n_rows,) and contain observed log realized
+    variances. Models may transform these targets internally during fitting.
+    """
 
     @property
     def name(self) -> str: ...
@@ -29,7 +48,14 @@ class Forecaster(Protocol):
     @property
     def feature_names(self) -> tuple[str, ...]: ...
 
-    def fit(self, features: FloatArray, target: FloatArray) -> FittedForecaster: ...
+    @property
+    def specification(self) -> ComponentSpecification:
+        """Describe this configured model, including its actual parameter values."""
+        ...
+
+    def fit(self, features: FloatArray, target: FloatArray) -> FittedForecaster:
+        """Fit aligned training rows and return a log-variance predictor."""
+        ...
 
 
 @runtime_checkable
@@ -52,3 +78,13 @@ class DatasetRepository(Protocol[Dataset]):
     def load(self) -> Dataset: ...
 
     def save(self, dataset: Dataset) -> None: ...
+
+
+@runtime_checkable
+class FeatureBuilder(Protocol[Dataset]):
+    """Prepare forecast features and describe the settings used to build them."""
+
+    @property
+    def specification(self) -> ComponentSpecification: ...
+
+    def __call__(self, daily: Dataset) -> Dataset: ...

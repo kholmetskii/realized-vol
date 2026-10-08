@@ -12,7 +12,7 @@ from rvol.models._validation import validated_features
 
 @dataclass(frozen=True)
 class ConstantPredictor:
-    """Predict one fitted constant for every row."""
+    """Return one fitted log-variance constant for every row."""
 
     value: float
     n_features: int = 0
@@ -30,7 +30,7 @@ class ConstantPredictor:
 
 @dataclass(frozen=True)
 class FeatureColumnPredictor:
-    """Return one selected feature as the prediction."""
+    """Return one selected log-variance feature as the prediction."""
 
     n_features: int
     column: int = 0

@@ -199,6 +199,7 @@ def test_forecast_evaluation_plot_builds_paths_losses_and_advantage_panels():
             summaries=tuple(summaries),
             comparisons=(),
         ),
+        candidate_model="HAR",
     )
 
     assert len(figure.axes) == 3

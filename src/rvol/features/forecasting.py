@@ -2,18 +2,61 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import ClassVar
+
 import numpy as np
 import pandas as pd
+
+from rvol.domain.specifications import ComponentSpecification
+
+
+@dataclass(frozen=True)
+class HARFeatureBuilder:
+    """Bind HAR feature settings to both preparation and experiment metadata."""
+
+    date_col: str = "date"
+    rv_col: str = "log_rv"
+    weekly_window: int = 5
+    monthly_window: int = 22
+    max_gap_days: int | None = 7
+
+    feature_names: ClassVar[tuple[str, ...]] = ("rv_daily", "rv_weekly", "rv_monthly")
+
+    @property
+    def specification(self) -> ComponentSpecification:
+        return ComponentSpecification(
+            name="HAR_features",
+            implementation=f"{type(self).__module__}.{type(self).__qualname__}",
+            feature_names=self.feature_names,
+            parameters=(
+                ("date_col", self.date_col),
+                ("rv_col", self.rv_col),
+                ("weekly_window", self.weekly_window),
+                ("monthly_window", self.monthly_window),
+                ("max_gap_days", self.max_gap_days),
+            ),
+        )
+
+    def __call__(self, daily: pd.DataFrame) -> pd.DataFrame:
+        return build_har_features(
+            daily,
+            date_col=self.date_col,
+            rv_col=self.rv_col,
+            weekly_window=self.weekly_window,
+            monthly_window=self.monthly_window,
+            max_gap_days=self.max_gap_days,
+        )
 
 
 def build_har_features(
     daily: pd.DataFrame,
     *,
-    date_col: str = "date",
-    rv_col: str = "log_rv",
-    weekly_window: int = 5,
-    monthly_window: int = 22,
-    max_gap_days: int | None = 7,
+    date_col: str = HARFeatureBuilder.date_col,
+    rv_col: str = HARFeatureBuilder.rv_col,
+    weekly_window: int = HARFeatureBuilder.weekly_window,
+    monthly_window: int = HARFeatureBuilder.monthly_window,
+    max_gap_days: int | None = HARFeatureBuilder.max_gap_days,
 ) -> pd.DataFrame:
     """Build one-step-ahead daily, weekly, and monthly HAR-RV features.
 
