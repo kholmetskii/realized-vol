@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Protocol, TypeVar, runtime_checkable
+from typing import Literal, Protocol, Self, TypeVar, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -29,6 +29,44 @@ class FittedForecaster(Protocol):
 
         The result has shape (n_rows,); exponentiating each value must yield
         a finite positive variance.
+        """
+        ...
+
+
+@runtime_checkable
+class UpdatablePredictor(FittedForecaster, Protocol):
+    """A fitted predictor that can consume new observations between fits."""
+
+    def update(self, features: FloatArray, target: FloatArray) -> Self:
+        """Return updated state without modifying this predictor or its inputs.
+
+        Rows are new, aligned observations in chronological order, with the
+        originating model's feature order and log-variance targets. The caller
+        supplies only outcomes available at the forecast origin and consumes
+        each observation once. An empty batch leaves the state unchanged.
+        Updating state retains the configured model parameters.
+        """
+        ...
+
+
+@runtime_checkable
+class TrainingWindowPolicy(Protocol):
+    """Select a contiguous window from chronological, already eligible rows."""
+
+    def select(self, n_available: int) -> slice:
+        """Return a slice within [0, n_available), without selecting future rows."""
+        ...
+
+
+@runtime_checkable
+class RefitSchedule(Protocol):
+    """Decide when to fit using the dataset's eligible forecast-origin index."""
+
+    def should_refit(self, eligible_origin_index: int) -> bool:
+        """Index zero is the first origin satisfying the training requirement.
+
+        Count observed eligible origins, including those before the reporting
+        start date, rather than calendar days or rows in a filtered report.
         """
         ...
 
