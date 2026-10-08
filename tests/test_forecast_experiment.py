@@ -6,7 +6,13 @@ import pandas as pd
 import pytest
 
 from rvol.application import WalkForwardExperiment
-from rvol.domain import EveryNSessions, ExperimentConfig, RollingWindow, WalkForwardStrategy
+from rvol.domain import (
+    ComponentSpecification,
+    EveryNSessions,
+    ExperimentConfig,
+    RollingWindow,
+    WalkForwardStrategy,
+)
 from rvol.domain.contracts import FloatArray
 from rvol.models import (
     AR1Forecaster,
@@ -116,6 +122,34 @@ def test_current_target_cannot_change_its_own_prediction_for_any_model():
         record.actual_log_rv for record in after.records if record.target_date == target_day
     }
     assert before_actual != after_actual
+
+
+def test_completed_run_preserves_execution_settings_if_a_custom_policy_changes():
+    class MutableSchedule:
+        interval = 3
+
+        @property
+        def specification(self) -> ComponentSpecification:
+            return ComponentSpecification(
+                name="custom", implementation="test.MutableSchedule",
+                parameters=(("interval", self.interval),),
+            )
+
+        def should_refit(self, eligible_origin_index: int) -> bool:
+            return eligible_origin_index % self.interval == 0
+
+    schedule = MutableSchedule()
+    strategy = WalkForwardStrategy(RollingWindow(8), schedule)
+    result = WalkForwardExperiment(
+        models=(HistoricalMeanForecaster(),),
+        config=ExperimentConfig(min_train_size=5, strategy=strategy),
+    ).run(feature_sample(18))
+    schedule.interval = 6
+
+    assert result.execution_specification is not None
+    assert result.execution_specification.training_window.parameters == (("size", 8),)
+    assert result.execution_specification.retrain.parameters == (("interval", 3),)
+    assert strategy.specification.retrain.parameters == (("interval", 6),)
 
 
 def test_experiment_rejects_duplicate_model_names_and_missing_features():
@@ -295,6 +329,8 @@ def test_current_outcome_cannot_enter_either_an_update_or_a_refit(position):
 
 def test_first_eligible_origin_always_initializes_the_models():
     class NoScheduledRefits:
+        specification = ComponentSpecification("none", "test.NoScheduledRefits")
+
         def should_refit(self, eligible_origin_index: int) -> bool:
             return False
 
@@ -321,6 +357,7 @@ def test_origins_must_advance_chronologically_for_cached_state():
 def test_custom_windows_cannot_select_future_or_reversed_history(selected):
     class InvalidWindow:
         max_size: int | None = None
+        specification = ComponentSpecification("invalid", "test.InvalidWindow")
 
         def select(self, n_available: int) -> slice:
             return selected

@@ -122,6 +122,7 @@ class WalkForwardExperiment:
     def run(self, features: pd.DataFrame) -> ExperimentResult:
         """Fit or update at each origin and report forecasts within date bounds."""
         frame = self._validated_features(features)
+        execution = self.config.strategy.specification
         plan = self._execution_plan(frame)
         anchor = plan[0].origin_date if plan else None
         first_output = next((
@@ -129,7 +130,9 @@ class WalkForwardExperiment:
             if self.config.forecast_start is None or step.target_date >= self.config.forecast_start
         ), None)
         if first_output is None:
-            return ExperimentResult(config=self.config, strategy_anchor=anchor)
+            return ExperimentResult(
+                config=self.config, strategy_anchor=anchor, execution_specification=execution,
+            )
 
         # Earlier fits are superseded by the last scheduled fit before output.
         # Start there, then consume every subsequent observation exactly once.
@@ -196,4 +199,7 @@ class WalkForwardExperiment:
                     train_end_date=train_end.date(),
                 ))
 
-        return ExperimentResult(records=tuple(records), config=self.config, strategy_anchor=anchor)
+        return ExperimentResult(
+            records=tuple(records), config=self.config, strategy_anchor=anchor,
+            execution_specification=execution,
+        )

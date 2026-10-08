@@ -55,3 +55,16 @@ class ExperimentSpecification:
         if missing:
             missing_names = ", ".join(sorted(missing))
             raise ValueError(f"feature specification is missing model inputs: {missing_names}")
+
+
+@dataclass(frozen=True)
+class ExecutionSpecification:
+    """Snapshot the implementations and settings controlling one run."""
+
+    implementation: str
+    training_window: ComponentSpecification
+    retrain: ComponentSpecification
+
+    def __post_init__(self) -> None:
+        if not self.implementation.strip():
+            raise ValueError("execution implementation must not be empty")

@@ -107,11 +107,37 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
         "predicted_log_rv",
         "actual_rv",
         "predicted_rv",
+        "fit_date",
+        "train_start_date",
+        "train_end_date",
     ]
     assert len(forecasts) == 30
     assert len(summaries) == 10
     assert len(comparisons) == 2 * len(expected_pairs)
-    assert metadata["schema_version"] == 2
+    assert metadata["schema_version"] == 3
+    assert metadata["execution"] == {
+        "implementation": "rvol.domain.policies.WalkForwardStrategy",
+        "training_window": {
+            "name": "expanding",
+            "implementation": "rvol.domain.policies.ExpandingWindow",
+            "feature_names": [],
+            "parameters": {},
+        },
+        "retrain": {
+            "name": "every_n_sessions",
+            "implementation": "rvol.domain.policies.EveryNSessions",
+            "feature_names": [],
+            "parameters": {"interval": 1},
+        },
+        "schedule_anchor": cast(pd.Timestamp, daily.loc[41, "date"]).date().isoformat(),
+        "schedule_anchor_policy": "first_eligible_origin",
+        "observation_update_policy": "newly_available_targets_between_refits",
+    }
+    assert forecasts["fit_date"].equals(forecasts["origin_date"])
+    assert forecasts["train_end_date"].equals(forecasts["origin_date"])
+    assert set(forecasts["train_start_date"]) == {
+        cast(pd.Timestamp, daily.loc[22, "date"]).date().isoformat(),
+    }
     assert metadata["dataset"]["rows"] == n_sessions
     assert len(metadata["dataset"]["sha256"]) == 64
     assert metadata["experiment"] == {

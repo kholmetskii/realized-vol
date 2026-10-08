@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from rvol.domain.contracts import RefitSchedule, TrainingWindowPolicy
+from rvol.domain.specifications import ComponentSpecification, ExecutionSpecification
 
 
 def _require_integer(value: int, name: str, minimum: int) -> None:
@@ -15,6 +16,12 @@ def _require_integer(value: int, name: str, minimum: int) -> None:
 @dataclass(frozen=True)
 class ExpandingWindow:
     """Select all eligible training observations available at the origin."""
+
+    @property
+    def specification(self) -> ComponentSpecification:
+        return ComponentSpecification(
+            name="expanding", implementation=f"{type(self).__module__}.{type(self).__qualname__}",
+        )
 
     @property
     def max_size(self) -> None:
@@ -39,6 +46,13 @@ class RollingWindow:
         _require_integer(self.size, "size", 1)
 
     @property
+    def specification(self) -> ComponentSpecification:
+        return ComponentSpecification(
+            name="rolling", implementation=f"{type(self).__module__}.{type(self).__qualname__}",
+            parameters=(("size", self.size),),
+        )
+
+    @property
     def max_size(self) -> int:
         return self.size
 
@@ -60,6 +74,14 @@ class EveryNSessions:
     def __post_init__(self) -> None:
         _require_integer(self.interval, "interval", 1)
 
+    @property
+    def specification(self) -> ComponentSpecification:
+        return ComponentSpecification(
+            name="every_n_sessions",
+            implementation=f"{type(self).__module__}.{type(self).__qualname__}",
+            parameters=(("interval", self.interval),),
+        )
+
     def should_refit(self, eligible_origin_index: int) -> bool:
         _require_integer(eligible_origin_index, "eligible_origin_index", 0)
         return eligible_origin_index % self.interval == 0
@@ -75,3 +97,11 @@ class WalkForwardStrategy:
 
     training_window: TrainingWindowPolicy = field(default_factory=ExpandingWindow)
     retrain: RefitSchedule = field(default_factory=EveryNSessions)
+
+    @property
+    def specification(self) -> ExecutionSpecification:
+        return ExecutionSpecification(
+            implementation=f"{type(self).__module__}.{type(self).__qualname__}",
+            training_window=self.training_window.specification,
+            retrain=self.retrain.specification,
+        )

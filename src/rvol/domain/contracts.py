@@ -54,6 +54,9 @@ class TrainingWindowPolicy(Protocol):
     """Select a contiguous window from chronological, already eligible rows."""
 
     @property
+    def specification(self) -> ComponentSpecification: ...
+
+    @property
     def max_size(self) -> int | None:
         """Maximum training count, or None for an unbounded window."""
         ...
@@ -66,6 +69,9 @@ class TrainingWindowPolicy(Protocol):
 @runtime_checkable
 class RefitSchedule(Protocol):
     """Decide when to fit using the dataset's eligible forecast-origin index."""
+
+    @property
+    def specification(self) -> ComponentSpecification: ...
 
     def should_refit(self, eligible_origin_index: int) -> bool:
         """Index zero is the first origin satisfying the training requirement.

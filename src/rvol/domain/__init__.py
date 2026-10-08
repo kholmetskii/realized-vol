@@ -18,12 +18,17 @@ from rvol.domain.policies import (
     WalkForwardStrategy,
 )
 from rvol.domain.results import ExperimentResult, ForecastRecord
-from rvol.domain.specifications import ComponentSpecification, ExperimentSpecification
+from rvol.domain.specifications import (
+    ComponentSpecification,
+    ExecutionSpecification,
+    ExperimentSpecification,
+)
 
 __all__ = [
     "ComponentSpecification",
     "DatasetRepository",
     "EveryNSessions",
+    "ExecutionSpecification",
     "ExpandingWindow",
     "ExperimentConfig",
     "ExperimentResult",

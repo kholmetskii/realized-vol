@@ -178,7 +178,10 @@ Forecast records carry `fit_date`, `train_start_date`, and `train_end_date`.
 Training boundaries refer to target dates in the last fit, and `n_train` is
 the count used by that fit, including when the model is reused or updated.
 `ExperimentResult` also retains the run configuration and the first eligible
-origin as `strategy_anchor`. CLI strategy options are the next integration step.
+origin as `strategy_anchor`. Its immutable `execution_specification` snapshots
+the strategy and both policies before execution. Custom window and refit
+policies supply a `specification` property describing their implementation and
+settings. CLI strategy options are the next integration step.
 
 ## Reproduce the plots
 
@@ -287,14 +290,23 @@ difference favours the candidate.
 When `--output-dir` is provided, the same run also writes normalized forecasts,
 mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
 records dataset coverage and a SHA-256 fingerprint so the exact input can be
-verified later. JSON schema version 2 also records a `specification` object
+verified later. JSON schema version 3 records a `specification` object
 containing the feature builder and each model's implementation, ordered feature
 names and settings, including EWMA decay and HAR's training-residual smearing
 correction. HAR windows count observed sessions; `max_gap_days` is a calendar-day
 gap limit. These are configured settings, rather than fitted coefficients.
-Existing metadata fields and CSV layouts are preserved; readers that check
-`schema_version` must accept version 2. Repeating an unchanged run produces
-byte-identical artifacts.
+The `execution` object records the strategy implementation, training-window
+and refit settings, the full dataset's schedule anchor, and the rule for updating
+state between refits. `forecasts.csv` appends `fit_date`, `train_start_date`, and
+`train_end_date`; its existing columns retain their order. The training count
+and boundaries describe the last actual fit, even when a predictor has since
+consumed new observations. Loss and comparison CSV layouts are unchanged.
+Readers that check `schema_version` must accept version 3. Repeating an unchanged
+run produces byte-identical artifacts.
+
+The artifact writer requires a completed runner result with its execution
+snapshot and fit boundaries. It rejects configuration or strategy metadata
+that differs from the completed run before creating output files.
 
 Run the fixed robustness checks without changing the model specifications:
 
