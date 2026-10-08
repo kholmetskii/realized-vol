@@ -181,7 +181,36 @@ the count used by that fit, including when the model is reused or updated.
 origin as `strategy_anchor`. Its immutable `execution_specification` snapshots
 the strategy and both policies before execution. Custom window and refit
 policies supply a `specification` property describing their implementation and
-settings. CLI strategy options are the next integration step.
+settings.
+
+The evaluation, forecast-plot and robustness commands share these options,
+including their installed `rvol-*` equivalents:
+
+| Option | Meaning | Default |
+|---|---|---|
+| `--training-window expanding` or `rolling` | History selected at each fit | `expanding` |
+| `--window-size N` | Maximum training observations for a rolling window | Required for `rolling` |
+| `--retrain-every N` | Refit every N eligible forecast sessions | `1` |
+
+For example, use up to 504 training observations and refit every fifth eligible
+session with:
+
+    python scripts/evaluate_forecasts.py \
+        data/derived/EURUSD_daily_rv_5min.parquet \
+        --min-train-size 252 \
+        --training-window rolling \
+        --window-size 504 \
+        --retrain-every 5 \
+        --forecast-start 2025-01-01 \
+        --forecast-end 2026-09-30 \
+        --output-dir outputs/rolling_504_refit_5
+
+Pass the same training and date options to `scripts/forecast_plots.py` or
+`scripts/robustness_report.py` to use the same forecasts in their outputs.
+`--window-size` requires `--training-window rolling` and must be at least
+`--min-train-size`. Counts and intervals must be positive integers. Invalid
+options and reversed date bounds produce usage errors before loading the data.
+Omitting the new options preserves expanding history and daily refitting.
 
 ## Reproduce the plots
 

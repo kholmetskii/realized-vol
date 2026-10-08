@@ -11,9 +11,11 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-from rvol.cli._arguments import iso_date  # noqa: E402
+from rvol.cli._arguments import (  # noqa: E402
+    add_forecast_arguments,
+    experiment_config_from_args,
+)
 from rvol.composition import standard_experiment_definition  # noqa: E402
-from rvol.domain import ExperimentConfig  # noqa: E402
 from rvol.infrastructure import ParquetDatasetRepository  # noqa: E402
 from rvol.plotting.forecasting import plot_forecast_evaluation  # noqa: E402
 
@@ -22,9 +24,7 @@ def main() -> None:
     definition = standard_experiment_definition()
     parser = argparse.ArgumentParser()
     parser.add_argument("daily", help="daily realized-variance Parquet dataset")
-    parser.add_argument("--min-train-size", type=int, default=ExperimentConfig().min_train_size)
-    parser.add_argument("--forecast-start", type=iso_date)
-    parser.add_argument("--forecast-end", type=iso_date)
+    add_forecast_arguments(parser)
     parser.add_argument(
         "--metric",
         choices=tuple(metric.name for metric in definition.metrics),
@@ -32,16 +32,10 @@ def main() -> None:
     )
     parser.add_argument("--out", default="figures/forecast_evaluation.png")
     args = parser.parse_args()
+    config = experiment_config_from_args(parser, args)
 
     daily = ParquetDatasetRepository(args.daily).load()
-    experiment = definition.run(
-        daily,
-        ExperimentConfig(
-            min_train_size=args.min_train_size,
-            forecast_start=args.forecast_start,
-            forecast_end=args.forecast_end,
-        ),
-    )
+    experiment = definition.run(daily, config)
     if not experiment.records:
         raise SystemExit("no forecasts: add more data or lower --min-train-size")
 
