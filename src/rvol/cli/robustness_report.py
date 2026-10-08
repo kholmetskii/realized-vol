@@ -5,9 +5,8 @@ from __future__ import annotations
 import argparse
 
 from rvol.cli._arguments import iso_date
-from rvol.composition import run_standard_forecast_experiment
+from rvol.composition import standard_experiment_definition
 from rvol.domain import ExperimentConfig
-from rvol.evaluation import ForecastRobustnessAnalyzer
 from rvol.infrastructure import ParquetDatasetRepository
 from rvol.reporting import RobustnessArtifactWriter
 
@@ -15,7 +14,7 @@ from rvol.reporting import RobustnessArtifactWriter
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("daily", help="daily realized-variance Parquet dataset")
-    parser.add_argument("--min-train-size", type=int, default=252)
+    parser.add_argument("--min-train-size", type=int, default=ExperimentConfig().min_train_size)
     parser.add_argument("--forecast-start", type=iso_date)
     parser.add_argument("--forecast-end", type=iso_date)
     parser.add_argument("--max-hac-lag", type=int, default=5)
@@ -30,8 +29,9 @@ def main() -> None:
     if args.top_errors < 1:
         parser.error("--top-errors must be positive")
 
+    definition = standard_experiment_definition()
     daily = ParquetDatasetRepository(args.daily).load()
-    experiment = run_standard_forecast_experiment(
+    experiment = definition.run(
         daily,
         ExperimentConfig(
             min_train_size=args.min_train_size,
@@ -42,7 +42,7 @@ def main() -> None:
     if not experiment.records:
         raise SystemExit("no forecasts: add more data or lower --min-train-size")
 
-    robustness = ForecastRobustnessAnalyzer(
+    robustness = definition.robustness_analyzer(
         hac_lags=tuple(range(args.max_hac_lag + 1)),
         top_errors=args.top_errors,
     ).analyze(experiment)

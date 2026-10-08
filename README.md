@@ -16,7 +16,7 @@ with error?
     src/rvol/domain/       immutable configuration, results, and protocols
     src/rvol/application/  model-agnostic walk-forward use cases
     src/rvol/cli/          packaged command-line entry points
-    src/rvol/composition/  standard model and feature assembly
+    src/rvol/composition/  experiment components and comparison defaults
     src/rvol/models/       interchangeable volatility forecasting models
     src/rvol/evaluation/   loss metrics and statistical model comparison
     src/rvol/reporting/    deterministic experiment artifacts
@@ -38,7 +38,8 @@ The forecasting dependency direction points toward stable contracts:
     cli (scripts delegate here)
        ├── composition ─┬──> application ──> domain
        │               ├──> models ────────> domain
-       │               └──> features
+       │               ├──> features
+       │               └──> evaluation ──> domain
        ├── evaluation ────────────────> domain
        ├── reporting ──> evaluation + domain
        └── infrastructure
@@ -85,6 +86,31 @@ removed. Convert DataFrames to arrays at the call site and use the common API:
 
 Fitted coefficients are available as `fitted.intercept` and
 `fitted.coefficients`, with slopes in `model.feature_names` order.
+
+The standard commands share an `ExperimentDefinition` from
+`rvol.composition.standard_experiment_definition`. It selects the feature
+builder, models, metrics, evaluation comparison pairs, plot candidate, and
+robustness baselines together. Construct a different definition to use other
+features, models, metrics, or comparison choices:
+
+    from rvol.composition import standard_experiment_definition
+    from rvol.domain import ExperimentConfig
+
+    definition = standard_experiment_definition()
+    experiment = definition.run(daily, ExperimentConfig(min_train_size=252))
+    evaluation = definition.evaluator().evaluate(experiment)
+
+Evaluation keeps the default naive-versus-HAR comparison and accepts ordered
+`--compare` overrides. Plots compare all other models with the configured
+candidate. Robustness uses the definition's ordered baseline list, with the
+requested HAC lags and top-error count. The existing
+`run_standard_forecast_experiment` helper delegates to the same definition.
+
+Direct `ForecastEvaluator` calls calculate loss summaries without implicit
+model comparisons; pass `comparison_pairs` explicitly when needed. Direct
+`ForecastRobustnessAnalyzer` and `plot_forecast_evaluation` calls require their
+candidate (and robustness baselines) explicitly. These numerical and plotting
+components do not select the project's model names.
 
 ## Reproduce the plots
 

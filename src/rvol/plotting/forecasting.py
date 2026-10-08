@@ -38,7 +38,7 @@ def plot_forecast_evaluation(
     experiment: ExperimentResult,
     evaluation: EvaluationResult,
     *,
-    candidate_model: str = "HAR",
+    candidate_model: str,
     metric: str = "QLIKE",
     title: str = "Out-of-sample realized-volatility forecasts",
 ) -> Figure:

@@ -12,25 +12,29 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from rvol.cli._arguments import iso_date  # noqa: E402
-from rvol.composition import run_standard_forecast_experiment  # noqa: E402
+from rvol.composition import standard_experiment_definition  # noqa: E402
 from rvol.domain import ExperimentConfig  # noqa: E402
-from rvol.evaluation import ForecastEvaluator  # noqa: E402
 from rvol.infrastructure import ParquetDatasetRepository  # noqa: E402
 from rvol.plotting.forecasting import plot_forecast_evaluation  # noqa: E402
 
 
 def main() -> None:
+    definition = standard_experiment_definition()
     parser = argparse.ArgumentParser()
     parser.add_argument("daily", help="daily realized-variance Parquet dataset")
-    parser.add_argument("--min-train-size", type=int, default=252)
+    parser.add_argument("--min-train-size", type=int, default=ExperimentConfig().min_train_size)
     parser.add_argument("--forecast-start", type=iso_date)
     parser.add_argument("--forecast-end", type=iso_date)
-    parser.add_argument("--metric", choices=("QLIKE", "log-RV MSE"), default="QLIKE")
+    parser.add_argument(
+        "--metric",
+        choices=tuple(metric.name for metric in definition.metrics),
+        default=definition.metrics[0].name,
+    )
     parser.add_argument("--out", default="figures/forecast_evaluation.png")
     args = parser.parse_args()
 
     daily = ParquetDatasetRepository(args.daily).load()
-    experiment = run_standard_forecast_experiment(
+    experiment = definition.run(
         daily,
         ExperimentConfig(
             min_train_size=args.min_train_size,
@@ -41,12 +45,14 @@ def main() -> None:
     if not experiment.records:
         raise SystemExit("no forecasts: add more data or lower --min-train-size")
 
-    comparisons = tuple((model, "HAR") for model in experiment.models if model != "HAR")
-    evaluation = ForecastEvaluator(comparison_pairs=comparisons).evaluate(experiment)
+    evaluation = definition.evaluator(
+        comparison_pairs=definition.all_comparison_pairs,
+    ).evaluate(experiment)
     target_dates = sorted({record.target_date for record in experiment.records})
     figure = plot_forecast_evaluation(
         experiment,
         evaluation,
+        candidate_model=definition.candidate_model,
         metric=args.metric,
         title=(
             "EUR/USD out-of-sample volatility forecasts "

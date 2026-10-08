@@ -18,7 +18,7 @@ PACKAGE_DEPENDENCIES = {
         "plotting",
         "reporting",
     },
-    "composition": {"application", "composition", "domain", "features", "models"},
+    "composition": {"application", "composition", "domain", "evaluation", "features", "models"},
     "data": {"data"},
     "diagnostics": {"diagnostics", "features", "market"},
     "estimators": {"estimators"},

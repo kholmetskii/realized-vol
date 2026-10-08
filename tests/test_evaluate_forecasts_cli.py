@@ -6,11 +6,13 @@ from typing import cast
 
 import numpy as np
 import pandas as pd
+import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
+@pytest.fixture
+def daily_dataset(tmp_path):
     n_sessions = 75
     step = np.arange(n_sessions, dtype="float64")
     log_rv = -10.0 + 0.25 * np.sin(step / 4) + 0.002 * step
@@ -22,10 +24,29 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
         "observation_count": np.full(n_sessions, 288),
     })
     source = tmp_path / "daily.parquet"
-    output_dir = tmp_path / "artifacts"
     daily.to_parquet(source, index=False)
+    return source, daily
+
+
+@pytest.mark.parametrize(
+    "comparison_pairs",
+    [None, (("naive", "HAR"), ("AR1", "HAR"))],
+    ids=["defaults", "overrides"],
+)
+def test_forecast_cli_composes_all_models_and_honours_date_bounds(
+    tmp_path, daily_dataset, comparison_pairs,
+):
+    source, daily = daily_dataset
+    n_sessions = len(daily)
+    output_dir = tmp_path / "artifacts"
     start = cast(pd.Timestamp, daily.loc[50, "date"]).date().isoformat()
     end = cast(pd.Timestamp, daily.loc[55, "date"]).date().isoformat()
+    comparison_args = [
+        argument
+        for pair in (comparison_pairs or ())
+        for argument in ("--compare", *pair)
+    ]
+    expected_pairs = (("naive", "HAR"),) if comparison_pairs is None else comparison_pairs
 
     completed = subprocess.run(
         [
@@ -42,12 +63,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
             "2",
             "--output-dir",
             str(output_dir),
-            "--compare",
-            "naive",
-            "HAR",
-            "--compare",
-            "AR1",
-            "HAR",
+            *comparison_args,
         ],
         cwd=PROJECT_ROOT,
         check=False,
@@ -63,7 +79,8 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
     assert "QLIKE" in completed.stdout
     assert "log-RV MSE" in completed.stdout
     assert "naive            HAR" in completed.stdout
-    assert "AR1              HAR" in completed.stdout
+    if comparison_pairs is not None:
+        assert "AR1              HAR" in completed.stdout
     assert "Newey-West lags: 2" in completed.stdout
 
     artifact_names = (
@@ -93,7 +110,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
     ]
     assert len(forecasts) == 30
     assert len(summaries) == 10
-    assert len(comparisons) == 4
+    assert len(comparisons) == 2 * len(expected_pairs)
     assert metadata["schema_version"] == 1
     assert metadata["dataset"]["rows"] == n_sessions
     assert len(metadata["dataset"]["sha256"]) == 64
@@ -108,8 +125,8 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
     }
     assert metadata["evaluation"]["hac_lags"] == 2
     assert metadata["evaluation"]["comparison_pairs"] == [
-        {"baseline": "naive", "candidate": "HAR"},
-        {"baseline": "AR1", "candidate": "HAR"},
+        {"baseline": baseline, "candidate": candidate}
+        for baseline, candidate in expected_pairs
     ]
 
     repeated = subprocess.run(
@@ -125,3 +142,51 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
         name: (output_dir / name).read_bytes()
         for name in artifact_names
     } == first_run
+
+
+@pytest.mark.parametrize("metric", [None, "log-RV MSE"], ids=["default_metric", "log_mse"])
+def test_plot_cli_uses_the_shared_experiment_and_metric_choices(tmp_path, daily_dataset, metric):
+    source, _ = daily_dataset
+    output = tmp_path / "forecast.png"
+    metric_args = [] if metric is None else ["--metric", metric]
+
+    completed = subprocess.run(
+        [
+            sys.executable, "scripts/forecast_plots.py", str(source),
+            "--min-train-size", "20", "--forecast-start", "2022-03-14",
+            "--forecast-end", "2022-03-21", "--out", str(output), *metric_args,
+        ],
+        cwd=PROJECT_ROOT, check=False, capture_output=True, text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "targets: 6" in completed.stdout
+    assert f"metric:  {metric or 'QLIKE'}" in completed.stdout
+    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_robustness_cli_uses_shared_baselines_and_preserves_option_overrides(
+    tmp_path, daily_dataset,
+):
+    source, _ = daily_dataset
+    output = tmp_path / "robustness"
+
+    completed = subprocess.run(
+        [
+            sys.executable, "scripts/robustness_report.py", str(source),
+            "--min-train-size", "20", "--forecast-start", "2022-03-14",
+            "--forecast-end", "2022-03-21", "--max-hac-lag", "1",
+            "--top-errors", "2", "--output-dir", str(output),
+        ],
+        cwd=PROJECT_ROOT, check=False, capture_output=True, text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "targets:          6" in completed.stdout
+    comparisons = pd.read_csv(output / "hac_sensitivity.csv")
+    assert len(comparisons) == 16
+    assert set(comparisons["hac_lags"]) == {0, 1}
+    assert set(comparisons["candidate_model"]) == {"HAR"}
+    assert set(comparisons["baseline_model"]) == {"naive", "EWMA", "AR1", "historical_mean"}
+    assert len(pd.read_csv(output / "largest_errors.csv")) == 10
+    assert len(pd.read_csv(output / "win_rates.csv")) == 8

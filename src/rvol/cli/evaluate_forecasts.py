@@ -5,9 +5,8 @@ from __future__ import annotations
 import argparse
 
 from rvol.cli._arguments import iso_date
-from rvol.composition import run_standard_forecast_experiment
+from rvol.composition import standard_experiment_definition
 from rvol.domain import ExperimentConfig
-from rvol.evaluation import ForecastEvaluator
 from rvol.infrastructure import ParquetDatasetRepository
 from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
 
@@ -15,7 +14,7 @@ from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("daily", help="daily realized-variance Parquet dataset")
-    parser.add_argument("--min-train-size", type=int, default=252)
+    parser.add_argument("--min-train-size", type=int, default=ExperimentConfig().min_train_size)
     parser.add_argument("--forecast-start", type=iso_date, help="first target date to evaluate")
     parser.add_argument("--forecast-end", type=iso_date, help="last target date to evaluate")
     parser.add_argument("--hac-lags", type=int)
@@ -32,19 +31,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    definition = standard_experiment_definition()
     daily = ParquetDatasetRepository(args.daily).load()
     config = ExperimentConfig(
         min_train_size=args.min_train_size,
         forecast_start=args.forecast_start,
         forecast_end=args.forecast_end,
     )
-    experiment_result = run_standard_forecast_experiment(daily, config)
+    experiment_result = definition.run(daily, config)
     if not experiment_result.records:
         raise SystemExit("no forecasts: add more data or lower --min-train-size")
 
-    comparison_pairs = tuple(args.compare or (("naive", "HAR"),))
-    evaluation = ForecastEvaluator(
-        comparison_pairs=comparison_pairs,
+    evaluation = definition.evaluator(
+        comparison_pairs=args.compare,
         hac_lags=args.hac_lags,
     ).evaluate(experiment_result)
     target_dates = sorted({record.target_date for record in experiment_result.records})

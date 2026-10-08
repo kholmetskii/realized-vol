@@ -77,7 +77,7 @@ class ForecastEvaluator:
         self,
         metrics: Sequence[ForecastMetric] | None = None,
         *,
-        comparison_pairs: Sequence[tuple[str, str]] = (("naive", "HAR"),),
+        comparison_pairs: Sequence[tuple[str, str]] = (),
         hac_lags: int | None = None,
     ) -> None:
         selected_metrics = (

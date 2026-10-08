@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -43,6 +45,8 @@ def experiment_result():
 
 def test_robustness_analyzer_calculates_all_predefined_checks():
     result = ForecastRobustnessAnalyzer(
+        candidate_model="HAR",
+        baseline_models=("naive", "EWMA", "AR1", "historical_mean"),
         hac_lags=(0, 1),
         top_errors=2,
     ).analyze(experiment_result())
@@ -67,6 +71,8 @@ def test_robustness_analyzer_calculates_all_predefined_checks():
 
 def test_robustness_writer_is_deterministic(tmp_path):
     result = ForecastRobustnessAnalyzer(
+        candidate_model="HAR",
+        baseline_models=("naive", "EWMA", "AR1", "historical_mean"),
         hac_lags=(0, 1),
         top_errors=2,
     ).analyze(experiment_result())
@@ -97,5 +103,10 @@ def test_robustness_writer_is_deterministic(tmp_path):
     ],
 )
 def test_robustness_analyzer_rejects_invalid_configuration(kwargs, message):
+    settings: dict[str, Any] = {
+        "candidate_model": "HAR",
+        "baseline_models": ("naive", "EWMA", "AR1", "historical_mean"),
+        **kwargs,
+    }
     with pytest.raises(ValueError, match=message):
-        ForecastRobustnessAnalyzer(**kwargs)
+        ForecastRobustnessAnalyzer(**settings)
