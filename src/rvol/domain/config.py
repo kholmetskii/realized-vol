@@ -2,31 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
+from typing import Generic, TypeVar
 
-from rvol.domain.policies import WalkForwardStrategy
+Settings = TypeVar("Settings", covariant=True)
 
 
 @dataclass(frozen=True)
-class ExperimentConfig:
-    """Date bounds, training requirements and execution strategy for one run."""
+class ExperimentConfig(Generic[Settings]):
+    """Shared reporting bounds and typed settings for the selected executor."""
 
-    min_train_size: int = 252
+    execution: Settings
     forecast_start: date | None = None
     forecast_end: date | None = None
-    strategy: WalkForwardStrategy = field(default_factory=WalkForwardStrategy)
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.min_train_size, bool)
-            or not isinstance(self.min_train_size, int)
-            or self.min_train_size < 1
-        ):
-            raise ValueError("min_train_size must be a positive integer")
-        capacity = self.strategy.training_window.max_size
-        if capacity is not None and capacity < self.min_train_size:
-            raise ValueError("training window size must be at least min_train_size")
         if (
             self.forecast_start is not None
             and self.forecast_end is not None

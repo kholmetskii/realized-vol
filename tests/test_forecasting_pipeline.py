@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from rvol.application import WalkForwardExperiment
-from rvol.domain import ExperimentConfig
+from rvol.domain import ExperimentConfig, WalkForwardSettings
 from rvol.evaluation import ForecastEvaluator
 from rvol.features.forecasting import build_har_features
 from rvol.models import HARForecaster, NaiveForecaster
@@ -35,7 +35,7 @@ def characterized_pipeline():
     features = build_har_features(daily)
     experiment = WalkForwardExperiment(
         models=(NaiveForecaster(), HARForecaster()),
-        config=ExperimentConfig(min_train_size=25),
+        config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=25)),
     ).run(features)
     evaluation = ForecastEvaluator(
         comparison_pairs=(("naive", "HAR"),), hac_lags=3,

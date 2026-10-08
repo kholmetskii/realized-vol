@@ -10,14 +10,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from rvol.application import HoldoutExperiment
 from rvol.composition import standard_experiment_definition
 from rvol.domain import (
     EveryNSessions,
     ExpandingWindow,
     ExperimentConfig,
     ExperimentResult,
+    HoldoutSettings,
     RollingWindow,
-    WalkForwardStrategy,
+    WalkForwardSettings,
 )
 from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter, RobustnessArtifactWriter
 
@@ -127,24 +129,34 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
     assert len(forecasts) == 30
     assert len(summaries) == 10
     assert len(comparisons) == 2 * len(expected_pairs)
-    assert metadata["schema_version"] == 3
+    assert metadata["schema_version"] == 4
     assert metadata["execution"] == {
-        "implementation": "rvol.domain.policies.WalkForwardStrategy",
-        "training_window": {
-            "name": "expanding",
-            "implementation": "rvol.domain.policies.ExpandingWindow",
+        "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",
+        "settings": {
+            "name": "walk_forward",
+            "implementation": "rvol.domain.settings.WalkForwardSettings",
             "feature_names": [],
-            "parameters": {},
+            "parameters": {"min_train_size": 20},
         },
-        "retrain": {
-            "name": "every_n_sessions",
-            "implementation": "rvol.domain.policies.EveryNSessions",
-            "feature_names": [],
-            "parameters": {"interval": 1},
+        "policies": {
+            "training_window": {
+                "name": "expanding",
+                "implementation": "rvol.domain.policies.ExpandingWindow",
+                "feature_names": [],
+                "parameters": {},
+            },
+            "retrain": {
+                "name": "every_n_sessions",
+                "implementation": "rvol.domain.policies.EveryNSessions",
+                "feature_names": [],
+                "parameters": {"interval": 1},
+            },
         },
-        "schedule_anchor": cast(pd.Timestamp, daily.loc[41, "date"]).date().isoformat(),
-        "schedule_anchor_policy": "first_eligible_origin",
-        "observation_update_policy": "newly_available_targets_between_refits",
+        "facts": {
+            "schedule_anchor": cast(pd.Timestamp, daily.loc[41, "date"]).date().isoformat(),
+            "schedule_anchor_policy": "first_eligible_origin",
+            "observation_update_policy": "newly_available_targets_between_refits",
+        },
     }
     assert forecasts["fit_date"].equals(forecasts["origin_date"])
     assert forecasts["train_end_date"].equals(forecasts["origin_date"])
@@ -158,7 +170,6 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
         "actual_forecast_start": start,
         "configured_forecast_end": end,
         "configured_forecast_start": start,
-        "min_train_size": 20,
         "models": ["AR1", "EWMA", "HAR", "historical_mean", "naive"],
         "target_count": 6,
     }
@@ -219,13 +230,9 @@ def test_forecast_cli_strategy_matches_the_python_run(tmp_path, daily_dataset, t
 
     assert completed.returncode == 0, completed.stderr
     definition = standard_experiment_definition()
-    config = ExperimentConfig(
-        min_train_size=20, forecast_start=start, forecast_end=end,
-        strategy=WalkForwardStrategy(
+    config = ExperimentConfig(execution=WalkForwardSettings(
             RollingWindow(25) if training_window == "rolling" else ExpandingWindow(),
-            EveryNSessions(5),
-        ),
-    )
+            EveryNSessions(5), min_train_size=20), forecast_start=start, forecast_end=end)
     experiment = definition.run(daily, config)
     expected = ForecastArtifactWriter(tmp_path / "expected").write(
         experiment, definition.evaluator().evaluate(experiment), config=config,
@@ -269,8 +276,9 @@ def test_plot_cli_passes_the_requested_strategy_forecasts_to_the_plot(
     source, daily = daily_dataset
     output = tmp_path / "rolling.png"
     expected = standard_experiment_definition().run(daily, ExperimentConfig(
-        min_train_size=20, forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
-        strategy=WalkForwardStrategy(RollingWindow(25), EveryNSessions(5)),
+        execution=WalkForwardSettings(RollingWindow(25), EveryNSessions(5), min_train_size=20),
+        forecast_start=date(2022, 3, 14),
+        forecast_end=date(2022, 3, 21),
     ))
     captured: list[ExperimentResult] = []
     plot = forecast_plots.plot_forecast_evaluation
@@ -326,8 +334,9 @@ def test_robustness_cli_uses_shared_baselines_and_preserves_option_overrides(
     if rolling:
         definition = standard_experiment_definition()
         experiment = definition.run(daily, ExperimentConfig(
-            min_train_size=20, forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
-            strategy=WalkForwardStrategy(RollingWindow(25), EveryNSessions(5)),
+            execution=WalkForwardSettings(RollingWindow(25), EveryNSessions(5), min_train_size=20),
+            forecast_start=date(2022, 3, 14),
+            forecast_end=date(2022, 3, 21),
         ))
         expected = RobustnessArtifactWriter(tmp_path / "expected").write(
             definition.robustness_analyzer(hac_lags=(0, 1), top_errors=2).analyze(experiment),
@@ -338,16 +347,84 @@ def test_robustness_cli_uses_shared_baselines_and_preserves_option_overrides(
 
 
 @pytest.mark.parametrize("module", ["evaluate_forecasts", "forecast_plots", "robustness_report"])
+@pytest.mark.parametrize("arguments, message", [
+    (["--training-window", "rolling"], "--window-size is required"),
+    (["--executor", "holdout"], "--train-end is required"),
+    (["--train-end", "2024-12-31"], "--train-end requires --executor holdout"),
+    (["--update-observations"], "--update-observations requires --executor holdout"),
+    (["--executor", "holdout", "--train-end", "2024-12-31", "--training-window", "expanding"],
+     "--training-window requires --executor walk-forward"),
+    (["--executor", "holdout", "--train-end", "2024-12-31", "--window-size", "504"],
+     "--window-size requires --executor walk-forward"),
+    (["--executor", "holdout", "--train-end", "2024-12-31", "--retrain-every", "1"],
+     "--retrain-every requires --executor walk-forward"),
+])
 def test_all_forecast_commands_validate_execution_options_before_loading_data(
-    tmp_path, monkeypatch, capsys, module,
+    tmp_path, monkeypatch, capsys, module, arguments, message,
 ):
     command = import_module(f"rvol.cli.{module}")
     monkeypatch.setattr(sys, "argv", [
-        module, str(tmp_path / "missing.parquet"), "--training-window", "rolling",
+        module, str(tmp_path / "missing.parquet"), *arguments,
     ])
 
     with pytest.raises(SystemExit) as error:
         command.main()
 
     assert error.value.code == 2
-    assert "--window-size is required" in capsys.readouterr().err
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("module", ["evaluate_forecasts", "forecast_plots", "robustness_report"])
+@pytest.mark.parametrize("update", [False, True])
+def test_all_forecast_commands_use_holdout_results_from_the_python_api(
+    tmp_path, daily_dataset, monkeypatch, module, update,
+):
+    source, daily = daily_dataset
+    command = import_module(f"rvol.cli.{module}")
+    definition = standard_experiment_definition(executor_factory=HoldoutExperiment)
+    config = ExperimentConfig(
+        execution=HoldoutSettings(date(2022, 3, 4), 20, update),
+        forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
+    )
+    expected = definition.run(daily, config)
+    output = tmp_path / "holdout"
+    args = [
+        module, str(source), "--executor", "holdout", "--train-end", "2022-03-04",
+        "--min-train-size", "20", "--forecast-start", "2022-03-14",
+        "--forecast-end", "2022-03-21", *(["--update-observations"] if update else []),
+    ]
+    captured: list[ExperimentResult] = []
+    if module == "forecast_plots":
+        plot = command.plot_forecast_evaluation
+
+        def capture(experiment, *plot_args, **kwargs):
+            captured.append(experiment)
+            return plot(experiment, *plot_args, **kwargs)
+
+        monkeypatch.setattr(command, "plot_forecast_evaluation", capture)
+        args += ["--out", str(output.with_suffix(".png"))]
+    else:
+        args += ["--output-dir", str(output)]
+        if module == "robustness_report":
+            args += ["--max-hac-lag", "1", "--top-errors", "2"]
+    monkeypatch.setattr(sys, "argv", args)
+
+    command.main()
+
+    if module == "forecast_plots":
+        assert captured == [expected]
+        assert output.with_suffix(".png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        return
+    if module == "evaluate_forecasts":
+        paths = ForecastArtifactWriter(tmp_path / "expected").write(
+            expected, definition.evaluator().evaluate(expected), config=config,
+            dataset=DatasetSnapshot.from_frame(source, daily),
+            specification=definition.specification,
+        ).all()
+    else:
+        paths = RobustnessArtifactWriter(tmp_path / "expected").write(
+            definition.robustness_analyzer(hac_lags=(0, 1), top_errors=2).analyze(expected),
+        ).all()
+    assert {p.name: p.read_bytes() for p in paths} == {
+        p.name: (output / p.name).read_bytes() for p in paths
+    }

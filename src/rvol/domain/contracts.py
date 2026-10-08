@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
-from typing import Literal, Protocol, Self, TypeVar, runtime_checkable
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Literal, Protocol, Self, TypeAlias, TypeVar, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
 
-from rvol.domain.specifications import ComponentSpecification
+from rvol.domain.specifications import ComponentSpecification, ExecutionSpecification
+
+if TYPE_CHECKING:
+    from rvol.domain.config import ExperimentConfig
+    from rvol.domain.results import ExperimentResult
 
 FloatArray = NDArray[np.float64]
 ForecastScale = Literal["log_variance", "variance"]
 Dataset = TypeVar("Dataset")
+ExecutorInput = TypeVar("ExecutorInput", contravariant=True)
+ExecutionSettings = TypeVar("ExecutionSettings")
+
+
+@runtime_checkable
+class DescribedExecutionSettings(Protocol):
+    """Settings that can supply a generic, immutable snapshot for artifact export."""
+
+    @property
+    def specification(self) -> ExecutionSpecification: ...
 
 
 @runtime_checkable
@@ -105,6 +120,26 @@ class Forecaster(Protocol):
     def fit(self, features: FloatArray, target: FloatArray) -> FittedForecaster:
         """Fit aligned training rows and return a log-variance predictor."""
         ...
+
+
+@runtime_checkable
+class ExperimentExecutor(Protocol[ExecutorInput]):
+    """Execute one experiment using models and configuration supplied at creation.
+
+    The implementation owns fitting, observation availability and forecasting.
+    It keeps fitted state local to a run and returns the common result objects
+    consumed by evaluation and reporting. Feature preparation happens before
+    run; the executor must not mutate the caller's prepared dataset.
+    """
+
+    def run(self, features: ExecutorInput) -> ExperimentResult: ...
+
+
+# A factory creates a fresh executor for each set of models and run configuration.
+ExperimentExecutorFactory: TypeAlias = Callable[
+    [Sequence[Forecaster], "ExperimentConfig[ExecutionSettings]"],
+    ExperimentExecutor[ExecutorInput],
+]
 
 
 @runtime_checkable

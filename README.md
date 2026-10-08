@@ -89,16 +89,47 @@ Fitted coefficients are available as `fitted.intercept` and
 
 The standard commands share an `ExperimentDefinition` from
 `rvol.composition.standard_experiment_definition`. It selects the feature
-builder, models, metrics, evaluation comparison pairs, plot candidate, and
-robustness baselines together. Construct a different definition to use other
-features, models, metrics, or comparison choices:
+builder, models, executor factory, metrics, evaluation comparison pairs, plot
+candidate, and robustness baselines together. Construct a different definition
+to use other features, models, execution methods, metrics, or comparison choices:
 
     from rvol.composition import standard_experiment_definition
-    from rvol.domain import ExperimentConfig
+    from rvol.domain import ExperimentConfig, WalkForwardSettings
 
     definition = standard_experiment_definition()
-    experiment = definition.run(daily, ExperimentConfig(min_train_size=252))
+    config = ExperimentConfig(execution=WalkForwardSettings(min_train_size=252))
+    experiment = definition.run(daily, config)
     evaluation = definition.evaluator().evaluate(experiment)
+
+`ExperimentExecutor[Dataset]` is the execution contract: `run(features)` returns
+an `ExperimentResult`. `ExperimentDefinition` receives an `executor_factory`
+that accepts `(models, config)` and creates a fresh executor for each call to
+`definition.run`. The definition prepares features and delegates execution;
+the executor owns fitting, observation availability and forecasting. Executors
+preserve the prepared input and keep fitted state local to each run.
+
+The standard factory is `WalkForwardExperiment`. Select another implementation
+through the same composition entry point:
+
+    definition = standard_experiment_definition(executor_factory=CustomExecutor)
+
+`CustomExecutor(models, config)` must implement `run(features)`. Independently
+constructed `ExperimentDefinition` objects also require an `executor_factory`.
+Executors return the common forecast records so evaluation and plotting can be
+reused; artifact export additionally requires the run configuration, execution
+snapshot and fit boundaries described below. Executors can use independent
+settings types. Schemes requiring fold identifiers need corresponding result
+extensions.
+
+`ExperimentConfig[Settings]` contains shared reporting dates and a required
+`execution` settings object. `ExperimentDefinition[Settings]` binds its executor
+factory to that settings type. Each execution method validates its own settings;
+the shared configuration does not impose training windows or refitting rules.
+`ExperimentRun(definition, config)` binds a compatible definition and settings
+for repeated calls to `run.run(daily)`. The commands use this same object when
+selecting an executor.
+`holdout_experiment_definition()` assembles the standard models and features
+with holdout execution; composition owns concrete executor selection.
 
 Evaluation keeps the default naive-versus-HAR comparison and accepts ordered
 `--compare` overrides. Plots compare all other models with the configured
@@ -129,13 +160,14 @@ calls now require this snapshot as the `specification` keyword argument.
 Execution policies select the strategy used by a walk-forward run:
 
     from rvol.composition import standard_experiment_definition
-    from rvol.domain import EveryNSessions, ExperimentConfig, RollingWindow, WalkForwardStrategy
+    from rvol.domain import EveryNSessions, ExperimentConfig, RollingWindow, WalkForwardSettings
 
-    strategy = WalkForwardStrategy(
+    settings = WalkForwardSettings(
         training_window=RollingWindow(size=504),
         retrain=EveryNSessions(5),
+        min_train_size=252,
     )
-    config = ExperimentConfig(min_train_size=252, strategy=strategy)
+    config = ExperimentConfig(execution=settings)
     definition = standard_experiment_definition()
     experiment = definition.run(daily, config)
 
@@ -146,7 +178,7 @@ already eligible training rows. `ExpandingWindow` selects all of them;
 starting at zero for the first origin meeting the training requirement.
 `EveryNSessions(5)` is due at indices 0, 5, 10, and so on, using indices from
 the full dataset even when only a later date range is reported. Calendar gaps
-do not advance the count. `WalkForwardStrategy()` defaults to expanding
+do not advance the count. `WalkForwardSettings()` defaults to expanding
 history and refitting every session.
 
 Fitted models may additionally implement `UpdatablePredictor`. Its
@@ -177,20 +209,60 @@ run. Origin dates must advance strictly in chronological order.
 Forecast records carry `fit_date`, `train_start_date`, and `train_end_date`.
 Training boundaries refer to target dates in the last fit, and `n_train` is
 the count used by that fit, including when the model is reused or updated.
-`ExperimentResult` also retains the run configuration and the first eligible
-origin as `strategy_anchor`. Its immutable `execution_specification` snapshots
-the strategy and both policies before execution. Custom window and refit
-policies supply a `specification` property describing their implementation and
-settings.
+`ExperimentResult` also retains the run configuration and immutable `execution`
+metadata. `ExecutionMetadata` records the actual executor implementation, an
+`ExecutionSpecification` snapshot and scalar runtime `facts`. Settings describe
+their own component and any named policies. Walk-forward supplies its schedule
+anchor and observation-update rule as runtime facts; the artifact writer adds
+no execution rules. Custom settings implement `DescribedExecutionSettings` for
+export, and custom window and refit policies provide component specifications.
+
+Chronological holdout uses a separate executor and settings type:
+
+    from datetime import date
+    from rvol.application import HoldoutExperiment
+    from rvol.composition import standard_experiment_definition
+    from rvol.domain import ExperimentConfig, HoldoutSettings
+
+    definition = standard_experiment_definition(executor_factory=HoldoutExperiment)
+    config = ExperimentConfig(
+        execution=HoldoutSettings(
+            train_end=date(2024, 12, 31),
+            min_train_size=252,
+            update_observations=False,
+        ),
+        forecast_start=date(2025, 1, 1),
+    )
+    experiment = definition.run(daily, config)
+    evaluation = definition.evaluator().evaluate(experiment)
+
+Holdout fits once using every prepared row whose target date is on or before
+`train_end`, and requires the minimum training count at that cutoff. Forecast
+origins must be on or after the cutoff; targets must follow it. A nontrading
+cutoff is allowed. Every forecast uses fresh input features with fixed fitted
+parameters. By default, predictor state is also fixed. Set
+`update_observations=True` to let stateful predictors consume newly available
+outcomes, once each, at subsequent origins. EWMA then updates its variance
+state; models without an update method keep their fitted predictors.
+
+Reporting dates do not change fitting or the observations available at an
+origin. `fit_date` remains the configured cutoff, and `n_train` and training
+boundaries describe the single fit. Holdout uses the same evaluator, plotting
+and artifact writer as walk-forward. Its metadata records the cutoff and update
+rule, without a walk-forward schedule anchor.
 
 The evaluation, forecast-plot and robustness commands share these options,
 including their installed `rvol-*` equivalents:
 
 | Option | Meaning | Default |
 |---|---|---|
+| `--executor walk-forward` or `holdout` | Execution method | `walk-forward` |
+| `--min-train-size N` | Minimum training observations | Selected executor's default (`252` for both) |
 | `--training-window expanding` or `rolling` | History selected at each fit | `expanding` |
 | `--window-size N` | Maximum training observations for a rolling window | Required for `rolling` |
 | `--retrain-every N` | Refit every N eligible forecast sessions | `1` |
+| `--train-end YYYY-MM-DD` | Holdout training cutoff | Required for `holdout` |
+| `--update-observations` | Update stateful holdout predictors with available outcomes | Disabled |
 
 For example, use up to 504 training observations and refit every fifth eligible
 session with:
@@ -211,6 +283,23 @@ Pass the same training and date options to `scripts/forecast_plots.py` or
 `--min-train-size`. Counts and intervals must be positive integers. Invalid
 options and reversed date bounds produce usage errors before loading the data.
 Omitting the new options preserves expanding history and daily refitting.
+
+Run chronological holdout with a fixed training cutoff:
+
+    python scripts/evaluate_forecasts.py \
+        data/derived/EURUSD_daily_rv_5min.parquet \
+        --executor holdout \
+        --train-end 2024-12-31 \
+        --min-train-size 252 \
+        --forecast-start 2025-01-01 \
+        --forecast-end 2026-09-30 \
+        --output-dir outputs/holdout_2024
+
+Add `--update-observations` to update EWMA state after the cutoff. Pass the same
+executor and date options to the plot and robustness commands. Holdout rejects
+`--training-window`, `--window-size` and `--retrain-every`, including explicitly
+supplied default values. Walk-forward rejects `--train-end` and
+`--update-observations`. Invalid combinations fail before data loading.
 
 ## Reproduce the plots
 
@@ -282,10 +371,11 @@ correction to target mean variance:
     predicted_rv = exp(predicted_log_rv)
 
 The correction uses only residuals from the eligible training window and is
-recomputed before every forecast. A log-sum-exp calculation avoids overflowing
-the exponentials. The correction assumes that the training residual distribution
-represents current forecast uncertainty, so it can improve QLIKE while worsening
-log-MSE. It is part of the single `HARForecaster.fit` implementation.
+recomputed at each fit, then retained until the next fit. A log-sum-exp
+calculation avoids overflowing the exponentials. The correction assumes that
+the training residual distribution represents current forecast uncertainty,
+so it can improve QLIKE while worsening log-MSE. It is part of the single
+`HARForecaster.fit` implementation.
 
 The common output scale does not imply a common statistical target:
 
@@ -319,19 +409,22 @@ difference favours the candidate.
 When `--output-dir` is provided, the same run also writes normalized forecasts,
 mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
 records dataset coverage and a SHA-256 fingerprint so the exact input can be
-verified later. JSON schema version 3 records a `specification` object
+verified later. JSON schema version 4 records a `specification` object
 containing the feature builder and each model's implementation, ordered feature
 names and settings, including EWMA decay and HAR's training-residual smearing
 correction. HAR windows count observed sessions; `max_gap_days` is a calendar-day
 gap limit. These are configured settings, rather than fitted coefficients.
-The `execution` object records the strategy implementation, training-window
-and refit settings, the full dataset's schedule anchor, and the rule for updating
-state between refits. `forecasts.csv` appends `fit_date`, `train_start_date`, and
+The `execution` object records the actual executor, its settings and policies,
+and executor-supplied runtime facts. For walk-forward, those facts include the
+full dataset's schedule anchor and the observation-update rule.
+`forecasts.csv` appends `fit_date`, `train_start_date`, and
 `train_end_date`; its existing columns retain their order. The training count
 and boundaries describe the last actual fit, even when a predictor has since
 consumed new observations. Loss and comparison CSV layouts are unchanged.
-Readers that check `schema_version` must accept version 3. Repeating an unchanged
-run produces byte-identical artifacts.
+Readers that check `schema_version` must accept version 4. Execution metadata
+now contains `executor`, `settings`, named `policies`, and runtime `facts`.
+`min_train_size` belongs to execution settings, rather than shared experiment
+bounds. Repeating an unchanged run produces byte-identical artifacts.
 
 The artifact writer requires a completed runner result with its execution
 snapshot and fit boundaries. It rejects configuration or strategy metadata

@@ -10,7 +10,12 @@ from datetime import date
 
 import pandas as pd
 
-from rvol.domain import ComponentSpecification, ExperimentConfig, ExperimentResult
+from rvol.domain import (
+    ComponentSpecification,
+    DescribedExecutionSettings,
+    ExperimentConfig,
+    ExperimentResult,
+)
 from rvol.domain.specifications import ExperimentSpecification
 from rvol.evaluation import EvaluationResult
 from rvol.reporting._files import atomic_csv, atomic_text
@@ -84,7 +89,7 @@ class ForecastArtifactWriter:
         experiment: ExperimentResult,
         evaluation: EvaluationResult,
         *,
-        config: ExperimentConfig,
+        config: ExperimentConfig[DescribedExecutionSettings],
         dataset: DatasetSnapshot,
         specification: ExperimentSpecification,
     ) -> ForecastArtifactPaths:
@@ -95,18 +100,13 @@ class ForecastArtifactWriter:
             raise ValueError("model specifications must match the forecast models")
         if experiment.config != config:
             raise ValueError("artifact configuration must match the completed experiment")
-        execution = experiment.execution_specification
-        if execution is None or experiment.strategy_anchor is None:
+        execution = experiment.execution
+        if execution is None:
             raise ValueError("experiment must include execution metadata")
-        if execution != config.strategy.specification:
+        if execution.settings != config.execution.specification:
             raise ValueError("execution specification must match the completed experiment")
         if any(record.fit_date is None for record in experiment.records):
             raise ValueError("forecast records must include fit dates and training boundaries")
-        if any(
-            record.fit_date is not None and record.fit_date < experiment.strategy_anchor
-            for record in experiment.records
-        ):
-            raise ValueError("fit dates must not precede the strategy anchor")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         paths = ForecastArtifactPaths(
             forecasts=self.output_dir / "forecasts.csv",
@@ -186,14 +186,15 @@ class ForecastArtifactWriter:
         if len(hac_lags) > 1:
             raise ValueError("comparisons must use one common HAC lag setting")
         payload = {
-            "schema_version": 3,
+            "schema_version": 4,
             "execution": {
-                "implementation": execution.implementation,
-                "training_window": _component_payload(execution.training_window),
-                "retrain": _component_payload(execution.retrain),
-                "schedule_anchor": experiment.strategy_anchor.isoformat(),
-                "schedule_anchor_policy": "first_eligible_origin",
-                "observation_update_policy": "newly_available_targets_between_refits",
+                "executor": execution.executor,
+                "settings": _component_payload(execution.settings.component),
+                "policies": {
+                    name: _component_payload(policy)
+                    for name, policy in execution.settings.policies
+                },
+                "facts": dict(execution.facts),
             },
             "specification": {
                 "features": _component_payload(specification.features),
@@ -210,7 +211,6 @@ class ForecastArtifactWriter:
                 "end_date": dataset.end_date.isoformat(),
             },
             "experiment": {
-                "min_train_size": config.min_train_size,
                 "configured_forecast_start": (
                     None if config.forecast_start is None else config.forecast_start.isoformat()
                 ),

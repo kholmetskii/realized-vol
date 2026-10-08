@@ -9,7 +9,7 @@ from rvol.domain import (
     RefitSchedule,
     RollingWindow,
     TrainingWindowPolicy,
-    WalkForwardStrategy,
+    WalkForwardSettings,
 )
 
 
@@ -56,13 +56,13 @@ def test_refit_schedule_keeps_its_first_eligible_origin_anchor():
 
 
 def test_default_strategy_refits_every_origin_using_all_available_history():
-    strategy = WalkForwardStrategy()
+    strategy = WalkForwardSettings()
 
     assert list(range(8))[strategy.training_window.select(8)] == list(range(8))
     assert all(strategy.retrain.should_refit(index) for index in range(8))
 
     changed = replace(
-        strategy, training_window=RollingWindow(3), retrain=EveryNSessions(5),
+        strategy, training_window=RollingWindow(3), retrain=EveryNSessions(5), min_train_size=1,
     )
     assert list(range(8))[changed.training_window.select(8)] == [5, 6, 7]
     assert not changed.retrain.should_refit(1)

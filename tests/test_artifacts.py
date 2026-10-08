@@ -1,12 +1,20 @@
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from rvol.composition import standard_experiment_definition
-from rvol.domain import EveryNSessions, ExperimentConfig, RollingWindow, WalkForwardStrategy
+from rvol.domain import (
+    ComponentSpecification,
+    EveryNSessions,
+    ExecutionMetadata,
+    ExecutionSpecification,
+    ExperimentConfig,
+    RollingWindow,
+    WalkForwardSettings,
+)
 from rvol.features.forecasting import HARFeatureBuilder
 from rvol.models import EWMAForecaster, HARForecaster
 from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
@@ -33,10 +41,9 @@ def configured_run(tmp_path):
         baseline_models=("EWMA",),
     )
     config = ExperimentConfig(
-        min_train_size=10,
+        execution=WalkForwardSettings(RollingWindow(12), EveryNSessions(3), min_train_size=10),
         forecast_start=dates[22].date(),
         forecast_end=dates[30].date(),
-        strategy=WalkForwardStrategy(RollingWindow(12), EveryNSessions(3)),
     )
     specification = definition.specification
     experiment = definition.run(daily, config)
@@ -54,25 +61,35 @@ def test_artifacts_record_nondefault_settings_and_remain_deterministic(tmp_path,
     first = {path.name: path.read_bytes() for path in paths.all()}
     metadata = json.loads(paths.experiment.read_text())
 
-    assert metadata["schema_version"] == 3
-    assert experiment.strategy_anchor is not None
+    assert metadata["schema_version"] == 4
+    assert experiment.execution is not None
     assert metadata["execution"] == {
-        "implementation": "rvol.domain.policies.WalkForwardStrategy",
-        "training_window": {
-            "name": "rolling",
-            "implementation": "rvol.domain.policies.RollingWindow",
+        "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",
+        "settings": {
+            "name": "walk_forward",
+            "implementation": "rvol.domain.settings.WalkForwardSettings",
             "feature_names": [],
-            "parameters": {"size": 12},
+            "parameters": {"min_train_size": 10},
         },
-        "retrain": {
-            "name": "every_n_sessions",
-            "implementation": "rvol.domain.policies.EveryNSessions",
-            "feature_names": [],
-            "parameters": {"interval": 3},
+        "policies": {
+            "training_window": {
+                "name": "rolling",
+                "implementation": "rvol.domain.policies.RollingWindow",
+                "feature_names": [],
+                "parameters": {"size": 12},
+            },
+            "retrain": {
+                "name": "every_n_sessions",
+                "implementation": "rvol.domain.policies.EveryNSessions",
+                "feature_names": [],
+                "parameters": {"interval": 3},
+            },
         },
-        "schedule_anchor": experiment.strategy_anchor.isoformat(),
-        "schedule_anchor_policy": "first_eligible_origin",
-        "observation_update_policy": "newly_available_targets_between_refits",
+        "facts": {
+            "schedule_anchor": dict(experiment.execution.facts)["schedule_anchor"],
+            "schedule_anchor_policy": "first_eligible_origin",
+            "observation_update_policy": "newly_available_targets_between_refits",
+        },
     }
     forecasts = pd.read_csv(paths.forecasts)
     records = sorted(experiment.records, key=lambda record: (record.target_date, record.model))
@@ -112,11 +129,10 @@ def test_writer_rejects_metadata_for_different_models_before_writing(tmp_path, c
     assert not output.exists()
 
 
-@pytest.mark.parametrize("missing", ["execution_specification", "strategy_anchor"])
-def test_writer_requires_execution_metadata_before_writing(tmp_path, configured_run, missing):
+def test_writer_requires_execution_metadata_before_writing(tmp_path, configured_run):
     experiment, evaluation, config, specification, snapshot = configured_run
     output = tmp_path / "artifacts"
-    incomplete = replace(experiment, **{missing: None})
+    incomplete = replace(experiment, execution=None)
 
     with pytest.raises(ValueError, match="must include execution metadata"):
         ForecastArtifactWriter(output).write(
@@ -132,7 +148,8 @@ def test_writer_rejects_configuration_for_a_different_run_before_writing(tmp_pat
 
     with pytest.raises(ValueError, match="configuration must match the completed experiment"):
         ForecastArtifactWriter(output).write(
-            experiment, evaluation, config=replace(config, min_train_size=11),
+            experiment, evaluation,
+            config=replace(config, execution=replace(config.execution, min_train_size=11)),
             dataset=snapshot, specification=specification,
         )
 
@@ -143,7 +160,9 @@ def test_writer_rejects_changed_execution_settings_before_writing(tmp_path, conf
     experiment, evaluation, config, specification, snapshot = configured_run
     output = tmp_path / "artifacts"
     inconsistent = replace(
-        experiment, execution_specification=WalkForwardStrategy().specification,
+        experiment, execution=replace(
+            experiment.execution, settings=WalkForwardSettings().specification,
+        ),
     )
 
     with pytest.raises(ValueError, match="execution specification must match"):
@@ -168,3 +187,35 @@ def test_writer_requires_fit_boundaries_before_writing(tmp_path, configured_run)
         )
 
     assert not output.exists()
+
+
+def test_writer_exports_independent_executor_metadata_without_walk_forward_rules(
+    tmp_path, configured_run,
+):
+    experiment, evaluation, config, specification, snapshot = configured_run
+
+    @dataclass(frozen=True)
+    class CustomSettings:
+        batches: int = 2
+
+        @property
+        def specification(self) -> ExecutionSpecification:
+            return ExecutionSpecification(ComponentSpecification(
+                "custom", "test.CustomSettings", parameters=(("batches", self.batches),),
+            ))
+
+    custom_config = replace(config, execution=CustomSettings())
+    metadata = ExecutionMetadata(
+        executor="test.CustomExecutor", settings=custom_config.execution.specification,
+        facts=(("completed_batches", 2),),
+    )
+    custom_run = replace(experiment, config=custom_config, execution=metadata)
+    paths = ForecastArtifactWriter(tmp_path / "custom").write(
+        custom_run, evaluation, config=custom_config, dataset=snapshot, specification=specification,
+    )
+
+    exported = json.loads(paths.experiment.read_text())["execution"]
+    assert exported["executor"] == "test.CustomExecutor"
+    assert exported["settings"]["parameters"] == {"batches": 2}
+    assert exported["policies"] == {}
+    assert exported["facts"] == {"completed_batches": 2}

@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from rvol.application import WalkForwardExperiment
-from rvol.domain import ExperimentConfig, ExperimentResult
+from rvol.domain import ExperimentConfig, ExperimentResult, WalkForwardSettings
 from rvol.evaluation import ForecastEvaluator, ModelLossSummary
 from rvol.models import (
     AR1Forecaster,
@@ -47,7 +47,7 @@ def experiment_result(
             HARForecaster(),
         ),
         config=ExperimentConfig(
-            min_train_size=20,
+            execution=WalkForwardSettings(min_train_size=20),
             forecast_start=forecast_start,
             forecast_end=forecast_end,
         ),

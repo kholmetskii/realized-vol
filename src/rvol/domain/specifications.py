@@ -59,12 +59,25 @@ class ExperimentSpecification:
 
 @dataclass(frozen=True)
 class ExecutionSpecification:
-    """Snapshot the implementations and settings controlling one run."""
+    """Executor-owned settings and any named component policies."""
 
-    implementation: str
-    training_window: ComponentSpecification
-    retrain: ComponentSpecification
+    component: ComponentSpecification
+    policies: tuple[tuple[str, ComponentSpecification], ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.implementation.strip():
-            raise ValueError("execution implementation must not be empty")
+        names = [name for name, _ in self.policies]
+        if len(names) != len(set(names)) or any(not name.strip() for name in names):
+            raise ValueError("execution policy names must be non-empty and unique")
+
+
+@dataclass(frozen=True)
+class ExecutionMetadata:
+    """Actual executor identity, settings snapshot and executor-owned runtime facts."""
+
+    executor: str
+    settings: ExecutionSpecification
+    facts: tuple[tuple[str, ParameterValue], ...] = ()
+
+    def __post_init__(self) -> None:
+        # Runtime facts have the same immutable, finite JSON scalar contract.
+        ComponentSpecification("execution", self.executor, parameters=self.facts)

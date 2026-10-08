@@ -15,7 +15,7 @@ from rvol.domain import (
     ForecastMetric,
     ForecastRecord,
     RollingWindow,
-    WalkForwardStrategy,
+    WalkForwardSettings,
 )
 
 
@@ -89,17 +89,18 @@ def test_structural_contracts_accept_independent_implementations():
 
 def test_experiment_config_is_immutable_and_validates_date_bounds():
     config = ExperimentConfig(
-        min_train_size=100,
+        execution=WalkForwardSettings(min_train_size=100),
         forecast_start=date(2023, 1, 1),
         forecast_end=date(2023, 12, 31),
     )
 
     with pytest.raises(FrozenInstanceError):
-        assign_attribute(config, "min_train_size", 10)
+        assign_attribute(config, "execution", WalkForwardSettings())
     with pytest.raises(ValueError, match="positive"):
-        ExperimentConfig(min_train_size=0)
+        ExperimentConfig(execution=WalkForwardSettings(min_train_size=0))
     with pytest.raises(ValueError, match="must not be after"):
         ExperimentConfig(
+            execution=WalkForwardSettings(),
             forecast_start=date(2024, 1, 1),
             forecast_end=date(2023, 1, 1),
         )
@@ -150,7 +151,20 @@ def test_forecast_record_rejects_invalid_domain_values(changes, message):
 
 def test_minimum_training_size_cannot_exceed_window_capacity():
     with pytest.raises(ValueError, match="window size must be at least min_train_size"):
-        ExperimentConfig(min_train_size=20, strategy=WalkForwardStrategy(RollingWindow(10)))
+        WalkForwardSettings(RollingWindow(10), min_train_size=20)
+
+
+@pytest.mark.parametrize("minimum", [0, -1, True, 1.5])
+def test_walk_forward_settings_validate_their_own_training_requirement(minimum):
+    with pytest.raises(ValueError, match="positive integer"):
+        WalkForwardSettings(min_train_size=minimum)
+
+
+def test_shared_configuration_accepts_independent_settings():
+    config = ExperimentConfig(execution=("custom", 3), forecast_start=date(2024, 1, 1))
+
+    assert config.execution == ("custom", 3)
+    assert not hasattr(config, "min_train_size")
 
 
 def test_forecast_fit_dates_must_be_complete_and_precede_the_origin():

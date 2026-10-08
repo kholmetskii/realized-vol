@@ -3,7 +3,12 @@ from typing import Any, cast
 
 import pytest
 
-from rvol.domain import ComponentSpecification, ExperimentSpecification
+from rvol.domain import (
+    ComponentSpecification,
+    ExecutionMetadata,
+    ExecutionSpecification,
+    ExperimentSpecification,
+)
 from rvol.models import EWMAForecaster
 
 
@@ -38,3 +43,16 @@ def test_experiment_specification_rejects_missing_feature_inputs():
             features=ComponentSpecification("features", "test.Features"),
             models=(ComponentSpecification("AR1", "test.AR1", feature_names=("rv_daily",)),),
         )
+
+
+def test_execution_metadata_validates_policy_names_and_runtime_facts():
+    component = ComponentSpecification("custom", "test.CustomSettings")
+    settings = ExecutionSpecification(component)
+    with pytest.raises(ValueError, match="policy names"):
+        ExecutionSpecification(component, policies=(("policy", component), ("policy", component)))
+    with pytest.raises(ValueError, match="must not be empty"):
+        ExecutionMetadata("", settings)
+    with pytest.raises(ValueError, match="finite"):
+        ExecutionMetadata("test.Executor", settings, facts=(("count", float("nan")),))
+    with pytest.raises(ValueError, match="unique"):
+        ExecutionMetadata("test.Executor", settings, facts=(("count", 1), ("count", 2)))

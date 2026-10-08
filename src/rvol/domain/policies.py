@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from rvol.domain.contracts import RefitSchedule, TrainingWindowPolicy
-from rvol.domain.specifications import ComponentSpecification, ExecutionSpecification
+from rvol.domain.specifications import ComponentSpecification
 
 
 def _require_integer(value: int, name: str, minimum: int) -> None:
@@ -85,23 +84,3 @@ class EveryNSessions:
     def should_refit(self, eligible_origin_index: int) -> bool:
         _require_integer(eligible_origin_index, "eligible_origin_index", 0)
         return eligible_origin_index % self.interval == 0
-
-
-@dataclass(frozen=True)
-class WalkForwardStrategy:
-    """Select a training window and refit schedule independently.
-
-    Defaults describe expanding history and refitting at every eligible origin.
-    The runner owns eligibility, date filtering and fitted model state.
-    """
-
-    training_window: TrainingWindowPolicy = field(default_factory=ExpandingWindow)
-    retrain: RefitSchedule = field(default_factory=EveryNSessions)
-
-    @property
-    def specification(self) -> ExecutionSpecification:
-        return ExecutionSpecification(
-            implementation=f"{type(self).__module__}.{type(self).__qualname__}",
-            training_window=self.training_window.specification,
-            retrain=self.retrain.specification,
-        )

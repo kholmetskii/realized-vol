@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from rvol.domain.config import ExperimentConfig
-from rvol.domain.specifications import ExecutionSpecification
+from rvol.domain.specifications import ExecutionMetadata
 
 
 def _require_name(value: str, field: str) -> None:
@@ -72,9 +72,8 @@ class ExperimentResult:
     """Forecast records from one experiment run."""
 
     records: tuple[ForecastRecord, ...] = ()
-    config: ExperimentConfig | None = None
-    strategy_anchor: date | None = None
-    execution_specification: ExecutionSpecification | None = None
+    config: ExperimentConfig[object] | None = None
+    execution: ExecutionMetadata | None = None
 
     @property
     def models(self) -> tuple[str, ...]:

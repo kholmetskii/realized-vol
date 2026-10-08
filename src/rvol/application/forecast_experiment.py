@@ -10,9 +10,12 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
+from rvol.application._forecast_data import validated_features, validated_models
 from rvol.domain.config import ExperimentConfig
 from rvol.domain.contracts import FittedForecaster, Forecaster, UpdatablePredictor
 from rvol.domain.results import ExperimentResult, ForecastRecord
+from rvol.domain.settings import WalkForwardSettings
+from rvol.domain.specifications import ExecutionMetadata
 
 
 @dataclass(frozen=True)
@@ -31,56 +34,15 @@ class WalkForwardExperiment:
     def __init__(
         self,
         models: Sequence[Forecaster],
-        config: ExperimentConfig,
+        config: ExperimentConfig[WalkForwardSettings],
     ) -> None:
-        if not models:
-            raise ValueError("at least one forecaster is required")
-        names = [model.name for model in models]
-        if len(names) != len(set(names)):
-            raise ValueError("forecaster names must be unique")
-        self.models = tuple(models)
+        if not isinstance(config.execution, WalkForwardSettings):
+            raise TypeError("walk-forward execution requires WalkForwardSettings")
+        self.models = validated_models(models)
         self.config = config
 
-    def _validated_features(self, features: pd.DataFrame) -> pd.DataFrame:
-        model_features = {
-            feature_name
-            for model in self.models
-            for feature_name in model.feature_names
-        }
-        required = {"origin_date", "target_date", "target", *model_features}
-        missing = required.difference(features.columns)
-        if missing:
-            names = ", ".join(sorted(missing))
-            raise ValueError(f"forecast data is missing required columns: {names}")
-
-        columns = ["origin_date", "target_date", *sorted(model_features), "target"]
-        frame = features.loc[:, columns].copy()
-        frame["origin_date"] = pd.to_datetime(frame["origin_date"], errors="coerce")
-        frame["target_date"] = pd.to_datetime(frame["target_date"], errors="coerce")
-        numeric = [*sorted(model_features), "target"]
-        frame[numeric] = frame[numeric].apply(pd.to_numeric, errors="coerce")
-        valid = (
-            frame["origin_date"].notna()
-            & frame["target_date"].notna()
-            & np.isfinite(frame[numeric]).all(axis=1)
-        )
-        if not valid.all():
-            raise ValueError("forecast data contains invalid dates or non-finite values")
-        if not (frame["origin_date"] < frame["target_date"]).all():
-            raise ValueError("every forecast origin must precede its target date")
-
-        frame = frame.sort_values("target_date").reset_index(drop=True)
-        if frame["target_date"].duplicated().any():
-            raise ValueError("forecast target dates must be unique")
-        if (
-            not frame["origin_date"].is_monotonic_increasing
-            or frame["origin_date"].duplicated().any()
-        ):
-            raise ValueError("forecast origin dates must be strictly increasing")
-        return frame
-
     def _training_slice(self, n_available: int) -> slice:
-        selected = self.config.strategy.training_window.select(n_available)
+        selected = self.config.execution.training_window.select(n_available)
         if not isinstance(selected, slice):
             raise ValueError("training window must select a contiguous slice")
         start = 0 if selected.start is None else selected.start
@@ -106,9 +68,9 @@ class WalkForwardExperiment:
                 break
             n_available = int(targets.searchsorted(origin, side="right"))
             training_slice = self._training_slice(n_available)
-            if training_slice.stop - training_slice.start < self.config.min_train_size:
+            if training_slice.stop - training_slice.start < self.config.execution.min_train_size:
                 continue
-            due = self.config.strategy.retrain.should_refit(len(steps))
+            due = self.config.execution.retrain.should_refit(len(steps))
             steps.append(_ExecutionStep(
                 position=position,
                 origin_date=origin.date(),
@@ -121,17 +83,26 @@ class WalkForwardExperiment:
 
     def run(self, features: pd.DataFrame) -> ExperimentResult:
         """Fit or update at each origin and report forecasts within date bounds."""
-        frame = self._validated_features(features)
-        execution = self.config.strategy.specification
+        frame = validated_features(features, self.models)
+        settings = self.config.execution.specification
         plan = self._execution_plan(frame)
         anchor = plan[0].origin_date if plan else None
+        execution = ExecutionMetadata(
+            executor=f"{type(self).__module__}.{type(self).__qualname__}",
+            settings=settings,
+            facts=(
+                ("schedule_anchor", None if anchor is None else anchor.isoformat()),
+                ("schedule_anchor_policy", "first_eligible_origin"),
+                ("observation_update_policy", "newly_available_targets_between_refits"),
+            ),
+        )
         first_output = next((
             index for index, step in enumerate(plan)
             if self.config.forecast_start is None or step.target_date >= self.config.forecast_start
         ), None)
         if first_output is None:
             return ExperimentResult(
-                config=self.config, strategy_anchor=anchor, execution_specification=execution,
+                config=self.config, execution=execution,
             )
 
         # Earlier fits are superseded by the last scheduled fit before output.
@@ -200,6 +171,5 @@ class WalkForwardExperiment:
                 ))
 
         return ExperimentResult(
-            records=tuple(records), config=self.config, strategy_anchor=anchor,
-            execution_specification=execution,
+            records=tuple(records), config=self.config, execution=execution,
         )

@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Generic, TypeVar, overload
 
 import pandas as pd
 
-from rvol.application import WalkForwardExperiment
+from rvol.application import HoldoutExperiment, WalkForwardExperiment
 from rvol.domain import (
     ExperimentConfig,
+    ExperimentExecutorFactory,
     ExperimentResult,
     ExperimentSpecification,
     FeatureBuilder,
     Forecaster,
+    HoldoutSettings,
+    WalkForwardSettings,
 )
 from rvol.domain.contracts import ForecastMetric
 from rvol.evaluation import (
@@ -31,13 +35,16 @@ from rvol.models import (
     NaiveForecaster,
 )
 
+Settings = TypeVar("Settings")
+
 
 @dataclass(frozen=True)
-class ExperimentDefinition:
+class ExperimentDefinition(Generic[Settings]):
     """Select the components and comparison defaults for a forecast workflow."""
 
     models: tuple[Forecaster, ...]
     feature_builder: FeatureBuilder[pd.DataFrame]
+    executor_factory: ExperimentExecutorFactory[Settings, pd.DataFrame]
     metrics: tuple[ForecastMetric, ...]
     comparison_pairs: tuple[tuple[str, str], ...]
     candidate_model: str
@@ -74,11 +81,10 @@ class ExperimentDefinition:
             if name != self.candidate_model
         )
 
-    def run(self, daily: pd.DataFrame, config: ExperimentConfig) -> ExperimentResult:
-        """Prepare features and run the selected models on common windows."""
-        return WalkForwardExperiment(models=self.models, config=config).run(
-            self.feature_builder(daily),
-        )
+    def run(self, daily: pd.DataFrame, config: ExperimentConfig[Settings]) -> ExperimentResult:
+        """Create an independent executor and delegate the prepared features."""
+        executor = self.executor_factory(self.models, config)
+        return executor.run(self.feature_builder(daily))
 
     def evaluator(
         self,
@@ -111,6 +117,17 @@ class ExperimentDefinition:
         )
 
 
+@dataclass(frozen=True)
+class ExperimentRun(Generic[Settings]):
+    """Bind an experiment definition to compatible settings for repeated execution."""
+
+    definition: ExperimentDefinition[Settings]
+    config: ExperimentConfig[Settings]
+
+    def run(self, daily: pd.DataFrame) -> ExperimentResult:
+        return self.definition.run(daily, self.config)
+
+
 def standard_forecasters() -> tuple[Forecaster, ...]:
     """Return fresh instances of the models used by standard project workflows."""
     return (
@@ -122,11 +139,26 @@ def standard_forecasters() -> tuple[Forecaster, ...]:
     )
 
 
-def standard_experiment_definition() -> ExperimentDefinition:
-    """Return fresh components and the standard commands' comparison choices."""
+@overload
+def standard_experiment_definition() -> ExperimentDefinition[WalkForwardSettings]: ...
+
+
+@overload
+def standard_experiment_definition(
+    *, executor_factory: ExperimentExecutorFactory[Settings, pd.DataFrame],
+) -> ExperimentDefinition[Settings]: ...
+
+
+def standard_experiment_definition(
+    *, executor_factory: ExperimentExecutorFactory[Settings, pd.DataFrame] | None = None,
+) -> ExperimentDefinition[Settings] | ExperimentDefinition[WalkForwardSettings]:
+    """Assemble fresh standard components with the selected execution method."""
+    if executor_factory is None:
+        return standard_experiment_definition(executor_factory=WalkForwardExperiment)
     return ExperimentDefinition(
         models=standard_forecasters(),
         feature_builder=HARFeatureBuilder(),
+        executor_factory=executor_factory,
         metrics=(QLikeMetric(), LogMSEMetric()),
         comparison_pairs=(("naive", "HAR"),),
         candidate_model="HAR",
@@ -134,9 +166,14 @@ def standard_experiment_definition() -> ExperimentDefinition:
     )
 
 
+def holdout_experiment_definition() -> ExperimentDefinition[HoldoutSettings]:
+    """Assemble the standard components for fixed-cutoff holdout execution."""
+    return standard_experiment_definition(executor_factory=HoldoutExperiment)
+
+
 def run_standard_forecast_experiment(
     daily: pd.DataFrame,
-    config: ExperimentConfig,
+    config: ExperimentConfig[WalkForwardSettings],
 ) -> ExperimentResult:
     """Build HAR features and run the standard model set on common windows."""
     return standard_experiment_definition().run(daily, config)

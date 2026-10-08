@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from typing import cast
 
@@ -11,7 +12,7 @@ from rvol.domain import (
     EveryNSessions,
     ExperimentConfig,
     RollingWindow,
-    WalkForwardStrategy,
+    WalkForwardSettings,
 )
 from rvol.domain.contracts import FloatArray
 from rvol.models import (
@@ -65,7 +66,7 @@ def date_at(features: pd.DataFrame, position: int, column: str = "target_date") 
 def test_experiment_runs_every_model_on_identical_expanding_windows():
     experiment = WalkForwardExperiment(
         models=all_models(),
-        config=ExperimentConfig(min_train_size=20),
+        config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=20)),
     )
 
     result = experiment.run(feature_sample())
@@ -88,7 +89,7 @@ def test_date_bounds_are_inclusive_and_preserve_prior_training_data():
     experiment = WalkForwardExperiment(
         models=all_models(),
         config=ExperimentConfig(
-            min_train_size=20,
+            execution=WalkForwardSettings(min_train_size=20),
             forecast_start=start,
             forecast_end=end,
         ),
@@ -107,7 +108,7 @@ def test_current_target_cannot_change_its_own_prediction_for_any_model():
     changed.loc[20, "target"] = cast(float, changed.loc[20, "target"]) + 100.0
     experiment = WalkForwardExperiment(
         models=all_models(),
-        config=ExperimentConfig(min_train_size=20),
+        config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=20)),
     )
     target_day = cast(pd.Timestamp, original.loc[20, "target_date"]).date()
 
@@ -139,29 +140,29 @@ def test_completed_run_preserves_execution_settings_if_a_custom_policy_changes()
             return eligible_origin_index % self.interval == 0
 
     schedule = MutableSchedule()
-    strategy = WalkForwardStrategy(RollingWindow(8), schedule)
+    strategy = WalkForwardSettings(RollingWindow(8), schedule, min_train_size=5)
     result = WalkForwardExperiment(
         models=(HistoricalMeanForecaster(),),
-        config=ExperimentConfig(min_train_size=5, strategy=strategy),
+        config=ExperimentConfig(execution=replace(strategy, min_train_size=5)),
     ).run(feature_sample(18))
     schedule.interval = 6
 
-    assert result.execution_specification is not None
-    assert result.execution_specification.training_window.parameters == (("size", 8),)
-    assert result.execution_specification.retrain.parameters == (("interval", 3),)
-    assert strategy.specification.retrain.parameters == (("interval", 6),)
+    assert result.execution is not None
+    assert dict(result.execution.settings.policies)["training_window"].parameters == (("size", 8),)
+    assert dict(result.execution.settings.policies)["retrain"].parameters == (("interval", 3),)
+    assert dict(strategy.specification.policies)["retrain"].parameters == (("interval", 6),)
 
 
 def test_experiment_rejects_duplicate_model_names_and_missing_features():
     with pytest.raises(ValueError, match="names must be unique"):
         WalkForwardExperiment(
             models=(NaiveForecaster(), NaiveForecaster()),
-            config=ExperimentConfig(),
+            config=ExperimentConfig(execution=WalkForwardSettings()),
         )
 
     experiment = WalkForwardExperiment(
         models=(HARForecaster(),),
-        config=ExperimentConfig(min_train_size=20),
+        config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=20)),
     )
     with pytest.raises(ValueError, match="rv_monthly"):
         experiment.run(feature_sample().drop(columns="rv_monthly"))
@@ -181,8 +182,7 @@ def test_rolling_refits_use_exact_windows_and_record_the_last_actual_fit():
     result = WalkForwardExperiment(
         models=(model,),
         config=ExperimentConfig(
-            min_train_size=5,
-            strategy=WalkForwardStrategy(RollingWindow(8), EveryNSessions(3)),
+            execution=WalkForwardSettings(RollingWindow(8), EveryNSessions(3), min_train_size=5),
         ),
     ).run(features)
 
@@ -192,7 +192,10 @@ def test_rolling_refits_use_exact_windows_and_record_the_last_actual_fit():
         np.testing.assert_array_equal(
             observed, features["target"].iloc[max(0, position - 8):position],
         )
-    assert result.strategy_anchor == date_at(features, 5, "origin_date")
+    assert result.execution is not None
+    assert dict(result.execution.facts)["schedule_anchor"] == date_at(
+        features, 5, "origin_date",
+    ).isoformat()
     for position, record in enumerate(result.records, start=5):
         fitted_at = 5 + ((position - 5) // 3) * 3
         first_training = max(0, fitted_at - 8)
@@ -211,7 +214,7 @@ def test_cached_parameters_still_receive_fresh_features_between_refits(model):
     result = WalkForwardExperiment(
         models=(model,),
         config=ExperimentConfig(
-            min_train_size=5, strategy=WalkForwardStrategy(retrain=EveryNSessions(4)),
+            execution=WalkForwardSettings(retrain=EveryNSessions(4), min_train_size=5),
         ),
     ).run(features)
     columns = list(model.feature_names)
@@ -235,11 +238,13 @@ def test_cached_parameters_still_receive_fresh_features_between_refits(model):
 def test_ewma_updates_between_expanding_refits_match_daily_fitting():
     features = feature_sample()
     daily = WalkForwardExperiment(
-        (EWMAForecaster(),), ExperimentConfig(min_train_size=5),
+        (EWMAForecaster(),), ExperimentConfig(execution=WalkForwardSettings(min_train_size=5)),
     ).run(features)
     periodic = WalkForwardExperiment(
         (EWMAForecaster(),),
-        ExperimentConfig(min_train_size=5, strategy=WalkForwardStrategy(retrain=EveryNSessions(5))),
+        ExperimentConfig(
+            execution=WalkForwardSettings(retrain=EveryNSessions(5), min_train_size=5),
+        ),
     ).run(features)
 
     np.testing.assert_array_equal(
@@ -255,7 +260,7 @@ def test_rolling_ewma_resets_on_refit_and_updates_between_refits():
     result = WalkForwardExperiment(
         (EWMAForecaster(decay=0.5),),
         ExperimentConfig(
-            min_train_size=5, strategy=WalkForwardStrategy(RollingWindow(8), EveryNSessions(3)),
+            execution=WalkForwardSettings(RollingWindow(8), EveryNSessions(3), min_train_size=5),
         ),
     ).run(features)
     variance = 0.0
@@ -282,7 +287,9 @@ def test_updates_consume_only_newly_available_labels_including_empty_and_multiro
     })
     result = WalkForwardExperiment(
         (EWMAForecaster(decay=0.5),),
-        ExperimentConfig(min_train_size=1, strategy=WalkForwardStrategy(retrain=EveryNSessions(5))),
+        ExperimentConfig(
+            execution=WalkForwardSettings(retrain=EveryNSessions(5), min_train_size=1),
+        ),
     ).run(features)
 
     np.testing.assert_allclose([record.predicted_rv for record in result.records], [1.0, 1.0, 5.75])
@@ -291,21 +298,25 @@ def test_updates_consume_only_newly_available_labels_including_empty_and_multiro
 
 def test_reporting_bounds_preserve_the_global_schedule_and_model_state():
     features = feature_sample()
-    strategy = WalkForwardStrategy(RollingWindow(12), EveryNSessions(5))
+    strategy = WalkForwardSettings(RollingWindow(12), EveryNSessions(5), min_train_size=5)
     full = WalkForwardExperiment(
-        all_models(), ExperimentConfig(min_train_size=5, strategy=strategy),
+        all_models(), ExperimentConfig(execution=replace(strategy, min_train_size=5)),
     )
     complete = full.run(features)
     start = date_at(features, 13)
     end = date_at(features, 23)
     bounded = WalkForwardExperiment(
-        all_models(), ExperimentConfig(5, start, end, strategy),
+        all_models(), ExperimentConfig(
+            execution=replace(strategy, min_train_size=5),
+            forecast_start=start,
+            forecast_end=end,
+        ),
     ).run(features)
 
     assert bounded.records == tuple(
         record for record in complete.records if start <= record.target_date <= end
     )
-    assert bounded.strategy_anchor == complete.strategy_anchor
+    assert bounded.execution == complete.execution
     assert bounded.records[0].fit_date is not None
     assert bounded.records[0].fit_date < bounded.records[0].origin_date
     assert full.run(features) == complete
@@ -318,7 +329,9 @@ def test_current_outcome_cannot_enter_either_an_update_or_a_refit(position):
     changed.loc[position, "target"] += 1.0
     experiment = WalkForwardExperiment(
         all_models(),
-        ExperimentConfig(min_train_size=5, strategy=WalkForwardStrategy(retrain=EveryNSessions(3))),
+        ExperimentConfig(
+            execution=WalkForwardSettings(retrain=EveryNSessions(3), min_train_size=5),
+        ),
     )
     target_day = date_at(original, position)
 
@@ -337,7 +350,7 @@ def test_first_eligible_origin_always_initializes_the_models():
     result = WalkForwardExperiment(
         (HistoricalMeanForecaster(),),
         ExperimentConfig(
-            min_train_size=5, strategy=WalkForwardStrategy(retrain=NoScheduledRefits()),
+            execution=WalkForwardSettings(retrain=NoScheduledRefits(), min_train_size=5),
         ),
     ).run(feature_sample(12))
 
@@ -350,7 +363,9 @@ def test_origins_must_advance_chronologically_for_cached_state():
     features.loc[6, "origin_date"] = features.loc[4, "origin_date"]
 
     with pytest.raises(ValueError, match="origin dates must be strictly increasing"):
-        WalkForwardExperiment(all_models(), ExperimentConfig(min_train_size=5)).run(features)
+        WalkForwardExperiment(all_models(), ExperimentConfig(
+            execution=WalkForwardSettings(min_train_size=5),
+        )).run(features)
 
 
 @pytest.mark.parametrize("selected", [slice(-1, 3), slice(0, 1000), slice(0, 0, -1)])
@@ -362,6 +377,6 @@ def test_custom_windows_cannot_select_future_or_reversed_history(selected):
         def select(self, n_available: int) -> slice:
             return selected
 
-    config = ExperimentConfig(min_train_size=5, strategy=WalkForwardStrategy(InvalidWindow()))
+    config = ExperimentConfig(execution=WalkForwardSettings(InvalidWindow(), min_train_size=5))
     with pytest.raises(ValueError, match="chronological, available observations"):
         WalkForwardExperiment(all_models(), config).run(feature_sample())

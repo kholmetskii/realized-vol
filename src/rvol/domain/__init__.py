@@ -3,6 +3,9 @@
 from rvol.domain.config import ExperimentConfig
 from rvol.domain.contracts import (
     DatasetRepository,
+    DescribedExecutionSettings,
+    ExperimentExecutor,
+    ExperimentExecutorFactory,
     FeatureBuilder,
     FittedForecaster,
     Forecaster,
@@ -15,11 +18,12 @@ from rvol.domain.policies import (
     EveryNSessions,
     ExpandingWindow,
     RollingWindow,
-    WalkForwardStrategy,
 )
 from rvol.domain.results import ExperimentResult, ForecastRecord
+from rvol.domain.settings import HoldoutSettings, WalkForwardSettings
 from rvol.domain.specifications import (
     ComponentSpecification,
+    ExecutionMetadata,
     ExecutionSpecification,
     ExperimentSpecification,
 )
@@ -27,10 +31,14 @@ from rvol.domain.specifications import (
 __all__ = [
     "ComponentSpecification",
     "DatasetRepository",
+    "DescribedExecutionSettings",
     "EveryNSessions",
+    "ExecutionMetadata",
     "ExecutionSpecification",
     "ExpandingWindow",
     "ExperimentConfig",
+    "ExperimentExecutor",
+    "ExperimentExecutorFactory",
     "ExperimentResult",
     "ExperimentSpecification",
     "FeatureBuilder",
@@ -38,9 +46,10 @@ __all__ = [
     "Forecaster",
     "ForecastMetric",
     "ForecastRecord",
+    "HoldoutSettings",
     "RefitSchedule",
     "RollingWindow",
     "TrainingWindowPolicy",
     "UpdatablePredictor",
-    "WalkForwardStrategy",
+    "WalkForwardSettings",
 ]

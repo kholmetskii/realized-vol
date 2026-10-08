@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from rvol.cli._arguments import add_forecast_arguments, experiment_config_from_args
-from rvol.composition import standard_experiment_definition
+from rvol.cli._arguments import add_forecast_arguments, experiment_run_from_args
 from rvol.infrastructure import ParquetDatasetRepository
 from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
 
@@ -27,12 +26,12 @@ def main() -> None:
         help="one-sided comparison that CANDIDATE has lower loss; may be repeated",
     )
     args = parser.parse_args()
-    config = experiment_config_from_args(parser, args)
+    run = experiment_run_from_args(parser, args)
 
-    definition = standard_experiment_definition()
+    definition = run.definition
     daily = ParquetDatasetRepository(args.daily).load()
     specification = definition.specification
-    experiment_result = definition.run(daily, config)
+    experiment_result = run.run(daily)
     if not experiment_result.records:
         raise SystemExit("no forecasts: add more data or lower --min-train-size")
 
@@ -74,7 +73,7 @@ def main() -> None:
         artifact_paths = ForecastArtifactWriter(args.output_dir).write(
             experiment_result,
             evaluation,
-            config=config,
+            config=run.config,
             dataset=snapshot,
             specification=specification,
         )
