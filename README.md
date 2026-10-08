@@ -58,10 +58,10 @@ the two, while higher layers consume the resulting daily quantities. Forecast
 models implement the domain `Forecaster` protocol, and Parquet persistence
 implements `DatasetRepository`; neither is hard-coded into the experiment.
 
-To add a model, implement `name`, `feature_names`, and `fit`, then inject the
-new object into `WalkForwardExperiment`. The experiment and evaluator do not
-need model-specific branches. Tests enforce the dependency direction so an
-inner layer cannot accidentally import an outer adapter.
+To add a model, implement `name`, `feature_names`, `specification`, and `fit`,
+then inject the new object into `WalkForwardExperiment`. The experiment and
+evaluator do not need model-specific branches. Tests enforce the dependency
+direction so an inner layer cannot accidentally import an outer adapter.
 
 All models share one array-based interface: `fit(features, target)` returns a
 fitted object with `predict(features)`. Features are two-dimensional arrays
@@ -125,6 +125,39 @@ models before running an experiment. Custom components describe their own
 settings; reporting depends on these domain values rather than importing
 concrete models or duplicating their defaults. Direct `ForecastArtifactWriter`
 calls now require this snapshot as the `specification` keyword argument.
+
+Execution policies can be composed independently of the runner:
+
+    from rvol.domain import EveryNSessions, RollingWindow, WalkForwardStrategy
+
+    strategy = WalkForwardStrategy(
+        training_window=RollingWindow(size=504),
+        retrain=EveryNSessions(5),
+    )
+
+`TrainingWindowPolicy.select(n_available)` returns a slice of chronological,
+already eligible training rows. `ExpandingWindow` selects all of them;
+`RollingWindow` selects up to its configured size. Sizes count observations.
+`RefitSchedule.should_refit(eligible_origin_index)` counts forecast origins
+starting at zero for the first origin meeting the training requirement.
+`EveryNSessions(5)` is due at indices 0, 5, 10, and so on, using indices from
+the full dataset even when only a later date range is reported. Calendar gaps
+do not advance the count. `WalkForwardStrategy()` defaults to expanding
+history and refitting every session.
+
+Fitted models may additionally implement `UpdatablePredictor`. Its
+`update(features, target)` method consumes new observations in chronological
+order and returns updated state, preserving its parameters, the previous
+predictor and the input arrays. Targets are observed log realized variances;
+the caller ensures availability and supplies each observation once. Empty
+batches preserve the state. EWMA implements this capability with the same
+variance-scale recursion used by `fit`; other fitted models retain the common
+`predict` interface. Fitting EWMA again initializes its state from the supplied
+training window.
+
+Connecting these policies and observation updates to `ExperimentConfig` and
+`WalkForwardExperiment` is the next implementation step. The current runner
+continues to use expanding history and refit every model at every origin.
 
 ## Reproduce the plots
 
