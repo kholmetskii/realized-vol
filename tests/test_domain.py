@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from rvol.domain import (
+    ComponentSpecification,
     DatasetRepository,
     ExperimentConfig,
     ExperimentResult,
@@ -31,6 +32,10 @@ class MeanPredictor:
 class MeanForecaster:
     name = "mean"
     feature_names: tuple[str, ...] = ()
+
+    @property
+    def specification(self) -> ComponentSpecification:
+        return ComponentSpecification(name=self.name, implementation="test.MeanForecaster")
 
     def fit(self, features: np.ndarray, target: np.ndarray) -> MeanPredictor:
         return MeanPredictor(float(np.mean(target)))

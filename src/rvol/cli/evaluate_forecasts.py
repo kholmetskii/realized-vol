@@ -38,6 +38,7 @@ def main() -> None:
         forecast_start=args.forecast_start,
         forecast_end=args.forecast_end,
     )
+    specification = definition.specification
     experiment_result = definition.run(daily, config)
     if not experiment_result.records:
         raise SystemExit("no forecasts: add more data or lower --min-train-size")
@@ -82,6 +83,7 @@ def main() -> None:
             evaluation,
             config=config,
             dataset=snapshot,
+            specification=specification,
         )
         print("\nartifacts:")
         for path in artifact_paths.all():

@@ -111,7 +111,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
     assert len(forecasts) == 30
     assert len(summaries) == 10
     assert len(comparisons) == 2 * len(expected_pairs)
-    assert metadata["schema_version"] == 1
+    assert metadata["schema_version"] == 2
     assert metadata["dataset"]["rows"] == n_sessions
     assert len(metadata["dataset"]["sha256"]) == 64
     assert metadata["experiment"] == {
@@ -123,6 +123,23 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
         "models": ["AR1", "EWMA", "HAR", "historical_mean", "naive"],
         "target_count": 6,
     }
+    specification = metadata["specification"]
+    assert specification["features"] == {
+        "name": "HAR_features",
+        "implementation": "rvol.features.forecasting.HARFeatureBuilder",
+        "feature_names": ["rv_daily", "rv_weekly", "rv_monthly"],
+        "parameters": {
+            "date_col": "date", "rv_col": "log_rv", "weekly_window": 5,
+            "monthly_window": 22, "max_gap_days": 7,
+        },
+    }
+    assert [model["name"] for model in specification["models"]] == metadata["experiment"]["models"]
+    models = {model["name"]: model for model in specification["models"]}
+    assert models["EWMA"]["parameters"] == {"decay": 0.94}
+    assert models["HAR"]["parameters"] == {"variance_correction": "duan_smearing"}
+    assert models["HAR"]["feature_names"] == ["rv_daily", "rv_weekly", "rv_monthly"]
+    assert models["AR1"]["feature_names"] == models["naive"]["feature_names"] == ["rv_daily"]
+    assert models["historical_mean"]["feature_names"] == models["EWMA"]["feature_names"] == []
     assert metadata["evaluation"]["hac_lags"] == 2
     assert metadata["evaluation"]["comparison_pairs"] == [
         {"baseline": baseline, "candidate": candidate}

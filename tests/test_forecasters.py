@@ -43,6 +43,9 @@ def test_forecasters_share_the_log_variance_fit_predict_contract(
 
     assert isinstance(model, Forecaster)
     assert isinstance(fitted, FittedForecaster)
+    assert model.specification.name == model.name
+    assert model.specification.feature_names == model.feature_names
+    assert model.specification.implementation.endswith(type(model).__qualname__)
     assert predicted.shape == (2,)
     np.testing.assert_allclose(predicted, np.log([expected_variance] * 2))
     np.testing.assert_array_equal(training, original_training)

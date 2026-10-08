@@ -38,7 +38,7 @@ The forecasting dependency direction points toward stable contracts:
     cli (scripts delegate here)
        ├── composition ─┬──> application ──> domain
        │               ├──> models ────────> domain
-       │               ├──> features
+       │               ├──> features ──────> domain
        │               └──> evaluation ──> domain
        ├── evaluation ────────────────> domain
        ├── reporting ──> evaluation + domain
@@ -111,6 +111,20 @@ model comparisons; pass `comparison_pairs` explicitly when needed. Direct
 `ForecastRobustnessAnalyzer` and `plot_forecast_evaluation` calls require their
 candidate (and robustness baselines) explicitly. These numerical and plotting
 components do not select the project's model names.
+
+Models and feature builders expose an immutable `ComponentSpecification` with
+an implementation identifier, ordered feature names and scalar settings.
+`Forecaster.specification` is part of the model contract;
+`FeatureBuilder[pd.DataFrame]` describes a callable with the same property.
+`HARFeatureBuilder` binds its column names, rolling windows and gap policy to
+both feature preparation and metadata. The `build_har_features` function
+remains available with the same defaults and arguments.
+
+Use `definition.specification` to snapshot the selected feature builder and
+models before running an experiment. Custom components describe their own
+settings; reporting depends on these domain values rather than importing
+concrete models or duplicating their defaults. Direct `ForecastArtifactWriter`
+calls now require this snapshot as the `specification` keyword argument.
 
 ## Reproduce the plots
 
@@ -219,7 +233,14 @@ difference favours the candidate.
 When `--output-dir` is provided, the same run also writes normalized forecasts,
 mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
 records dataset coverage and a SHA-256 fingerprint so the exact input can be
-verified later. Repeating an unchanged run produces byte-identical artifacts.
+verified later. JSON schema version 2 also records a `specification` object
+containing the feature builder and each model's implementation, ordered feature
+names and settings, including EWMA decay and HAR's training-residual smearing
+correction. HAR windows count observed sessions; `max_gap_days` is a calendar-day
+gap limit. These are configured settings, rather than fitted coefficients.
+Existing metadata fields and CSV layouts are preserved; readers that check
+`schema_version` must accept version 2. Repeating an unchanged run produces
+byte-identical artifacts.
 
 Run the fixed robustness checks without changing the model specifications:
 

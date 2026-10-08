@@ -10,7 +10,8 @@ from datetime import date
 
 import pandas as pd
 
-from rvol.domain import ExperimentConfig, ExperimentResult
+from rvol.domain import ComponentSpecification, ExperimentConfig, ExperimentResult
+from rvol.domain.specifications import ExperimentSpecification
 from rvol.evaluation import EvaluationResult
 from rvol.reporting._files import atomic_csv, atomic_text
 
@@ -85,10 +86,13 @@ class ForecastArtifactWriter:
         *,
         config: ExperimentConfig,
         dataset: DatasetSnapshot,
+        specification: ExperimentSpecification,
     ) -> ForecastArtifactPaths:
         """Write forecasts, aggregate losses, comparisons, and run metadata."""
         if not experiment.records:
             raise ValueError("experiment must contain forecast records")
+        if sorted(model.name for model in specification.models) != list(experiment.models):
+            raise ValueError("model specifications must match the forecast models")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         paths = ForecastArtifactPaths(
             forecasts=self.output_dir / "forecasts.csv",
@@ -162,7 +166,14 @@ class ForecastArtifactWriter:
         if len(hac_lags) > 1:
             raise ValueError("comparisons must use one common HAC lag setting")
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
+            "specification": {
+                "features": _component_payload(specification.features),
+                "models": [
+                    _component_payload(model)
+                    for model in sorted(specification.models, key=lambda item: item.name)
+                ],
+            },
             "dataset": {
                 "source": dataset.source,
                 "sha256": dataset.sha256,
@@ -194,3 +205,12 @@ class ForecastArtifactWriter:
         }
         atomic_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", paths.experiment)
         return paths
+
+
+def _component_payload(specification: ComponentSpecification) -> dict[str, object]:
+    return {
+        "name": specification.name,
+        "implementation": specification.implementation,
+        "feature_names": list(specification.feature_names),
+        "parameters": dict(specification.parameters),
+    }

@@ -23,7 +23,7 @@ PACKAGE_DEPENDENCIES = {
     "diagnostics": {"diagnostics", "features", "market"},
     "estimators": {"estimators"},
     "evaluation": {"domain", "evaluation"},
-    "features": {"estimators", "features", "market"},
+    "features": {"domain", "estimators", "features", "market"},
     "market": {"market"},
     "models": {"domain", "models"},
     "infrastructure": {"domain", "infrastructure"},

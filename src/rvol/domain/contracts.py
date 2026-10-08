@@ -7,6 +7,8 @@ from typing import Literal, Protocol, TypeVar, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
+from rvol.domain.specifications import ComponentSpecification
+
 FloatArray = NDArray[np.float64]
 ForecastScale = Literal["log_variance", "variance"]
 Dataset = TypeVar("Dataset")
@@ -46,6 +48,11 @@ class Forecaster(Protocol):
     @property
     def feature_names(self) -> tuple[str, ...]: ...
 
+    @property
+    def specification(self) -> ComponentSpecification:
+        """Describe this configured model, including its actual parameter values."""
+        ...
+
     def fit(self, features: FloatArray, target: FloatArray) -> FittedForecaster:
         """Fit aligned training rows and return a log-variance predictor."""
         ...
@@ -71,3 +78,13 @@ class DatasetRepository(Protocol[Dataset]):
     def load(self) -> Dataset: ...
 
     def save(self, dataset: Dataset) -> None: ...
+
+
+@runtime_checkable
+class FeatureBuilder(Protocol[Dataset]):
+    """Prepare forecast features and describe the settings used to build them."""
+
+    @property
+    def specification(self) -> ComponentSpecification: ...
+
+    def __call__(self, daily: Dataset) -> Dataset: ...

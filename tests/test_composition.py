@@ -10,7 +10,7 @@ from rvol.composition import (
     standard_experiment_definition,
     standard_forecasters,
 )
-from rvol.domain import ExperimentConfig
+from rvol.domain import ComponentSpecification, ExperimentConfig
 from rvol.evaluation import LogMSEMetric
 from rvol.models import HistoricalMeanForecaster, NaiveForecaster
 
@@ -84,17 +84,22 @@ def test_definition_preserves_comparison_overrides_including_empty_pairs():
 
 
 def test_definition_supports_other_feature_builders_models_metrics_and_candidates():
-    def daily_features(daily: pd.DataFrame) -> pd.DataFrame:
-        return pd.DataFrame({
-            "origin_date": daily["date"].iloc[:-1].to_numpy(),
-            "target_date": daily["date"].iloc[1:].to_numpy(),
-            "rv_daily": daily["log_rv"].iloc[:-1].to_numpy(),
-            "target": daily["log_rv"].iloc[1:].to_numpy(),
-        })
+    class DailyFeatures:
+        specification = ComponentSpecification(
+            name="daily", implementation="test.DailyFeatures", feature_names=("rv_daily",),
+        )
+
+        def __call__(self, daily: pd.DataFrame) -> pd.DataFrame:
+            return pd.DataFrame({
+                "origin_date": daily["date"].iloc[:-1].to_numpy(),
+                "target_date": daily["date"].iloc[1:].to_numpy(),
+                "rv_daily": daily["log_rv"].iloc[:-1].to_numpy(),
+                "target": daily["log_rv"].iloc[1:].to_numpy(),
+            })
 
     definition = ExperimentDefinition(
         models=(HistoricalMeanForecaster(), NaiveForecaster()),
-        feature_builder=daily_features,
+        feature_builder=DailyFeatures(),
         metrics=(LogMSEMetric(),),
         comparison_pairs=(("historical_mean", "naive"),),
         candidate_model="naive",
@@ -111,6 +116,7 @@ def test_definition_supports_other_feature_builders_models_metrics_and_candidate
     assert evaluation.comparisons[0].candidate_model == "naive"
     assert robustness.win_rates[0].candidate_model == "naive"
     assert definition.all_comparison_pairs == (("historical_mean", "naive"),)
+    assert definition.specification.features.name == "daily"
 
 
 def test_standard_definitions_do_not_share_model_or_metric_instances():

@@ -6,6 +6,7 @@ import numpy as np
 from scipy.special import logsumexp
 
 from rvol.domain.contracts import FloatArray
+from rvol.domain.specifications import ComponentSpecification
 from rvol.models.linear import LinearPredictor, fit_ols
 
 HAR_FEATURES = ("rv_daily", "rv_weekly", "rv_monthly")
@@ -23,6 +24,15 @@ class HARForecaster:
 
     name = "HAR"
     feature_names = HAR_FEATURES
+
+    @property
+    def specification(self) -> ComponentSpecification:
+        return ComponentSpecification(
+            name=self.name,
+            implementation=f"{type(self).__module__}.{type(self).__qualname__}",
+            feature_names=self.feature_names,
+            parameters=(("variance_correction", "duan_smearing"),),
+        )
 
     def fit(self, features: FloatArray, target: FloatArray) -> LinearPredictor:
         fitted = fit_ols(features, target, n_features=len(self.feature_names))

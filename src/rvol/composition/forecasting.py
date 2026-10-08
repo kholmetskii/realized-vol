@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pandas as pd
 
 from rvol.application import WalkForwardExperiment
-from rvol.domain import ExperimentConfig, ExperimentResult, Forecaster
+from rvol.domain import (
+    ExperimentConfig,
+    ExperimentResult,
+    ExperimentSpecification,
+    FeatureBuilder,
+    Forecaster,
+)
 from rvol.domain.contracts import ForecastMetric
 from rvol.evaluation import (
     ForecastEvaluator,
@@ -16,7 +22,7 @@ from rvol.evaluation import (
     LogMSEMetric,
     QLikeMetric,
 )
-from rvol.features.forecasting import build_har_features
+from rvol.features.forecasting import HARFeatureBuilder
 from rvol.models import (
     AR1Forecaster,
     EWMAForecaster,
@@ -31,7 +37,7 @@ class ExperimentDefinition:
     """Select the components and comparison defaults for a forecast workflow."""
 
     models: tuple[Forecaster, ...]
-    feature_builder: Callable[[pd.DataFrame], pd.DataFrame]
+    feature_builder: FeatureBuilder[pd.DataFrame]
     metrics: tuple[ForecastMetric, ...]
     comparison_pairs: tuple[tuple[str, str], ...]
     candidate_model: str
@@ -48,6 +54,16 @@ class ExperimentDefinition:
         missing = references.difference(names)
         if missing:
             raise ValueError(f"definition references unknown models: {', '.join(sorted(missing))}")
+
+    @property
+    def specification(self) -> ExperimentSpecification:
+        """Snapshot settings from the configured components, in model-name order."""
+        configured = sorted(self.models, key=lambda model: model.name)
+        models = tuple(model.specification for model in configured)
+        for model, spec in zip(configured, models, strict=True):
+            if spec.name != model.name or spec.feature_names != model.feature_names:
+                raise ValueError("model specification must match its name and feature order")
+        return ExperimentSpecification(features=self.feature_builder.specification, models=models)
 
     @property
     def all_comparison_pairs(self) -> tuple[tuple[str, str], ...]:
@@ -110,7 +126,7 @@ def standard_experiment_definition() -> ExperimentDefinition:
     """Return fresh components and the standard commands' comparison choices."""
     return ExperimentDefinition(
         models=standard_forecasters(),
-        feature_builder=build_har_features,
+        feature_builder=HARFeatureBuilder(),
         metrics=(QLikeMetric(), LogMSEMetric()),
         comparison_pairs=(("naive", "HAR"),),
         candidate_model="HAR",
