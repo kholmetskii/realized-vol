@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import pathlib
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 
 import pandas as pd
 
 from rvol.evaluation import RobustnessResult
 from rvol.reporting._files import atomic_csv, atomic_text
+from rvol.reporting._metadata import configuration_payload
 
 
 @dataclass(frozen=True)
@@ -40,10 +42,13 @@ class RobustnessArtifactWriter:
     def __init__(self, output_dir: str | pathlib.Path) -> None:
         self.output_dir = pathlib.Path(output_dir)
 
-    def write(self, robustness: RobustnessResult) -> RobustnessArtifactPaths:
+    def write(
+        self, robustness: RobustnessResult, *, configuration: Mapping[str, object] | None = None,
+    ) -> RobustnessArtifactPaths:
         names = [result.name for result in robustness.checks]
         if not names or len(set(names)) != len(names):
             raise ValueError("robustness results must have non-empty, unique checks")
+        resolved = configuration_payload(configuration)
         sections = []
         for result in robustness.checks:
             table = _table(
@@ -69,7 +74,8 @@ class RobustnessArtifactWriter:
             atomic_csv(frame, paths.csv(result.name))
         report = (
             "# Forecast robustness report\n\n"
-            f"Target: {robustness.target_horizon.kind}, "
+            + (f"Instrument: {robustness.instrument}\n\n" if robustness.instrument else "")
+            + f"Target: {robustness.target_horizon.kind}, "
             f"horizon {robustness.target_horizon.sessions} observed sessions.\n\n"
             "All checks use the fixed model specifications and out-of-sample forecasts. "
             "No model is refitted or selected from these diagnostics.\n\n"
@@ -77,7 +83,9 @@ class RobustnessArtifactWriter:
         )
         atomic_text(report, paths.report)
         payload = {
-            "schema_version": 3,
+            "schema_version": 4,
+            "instrument": robustness.instrument,
+            "resolved_configuration": resolved,
             "identity": asdict(robustness.identity),
             "target": asdict(robustness.target_horizon),
             "checks": [

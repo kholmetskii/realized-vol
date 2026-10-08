@@ -1,0 +1,35 @@
+version = 1
+
+[dataset]
+instrument = "EUR/USD"
+
+[run]
+run_id = "har_only"
+forecast_start = 2025-01-01
+forecast_end = 2026-09-30
+
+[target]
+name = "realized_variance"
+sessions = 1
+kind = "session"
+
+[execution]
+name = "walk-forward"
+min_train_size = 252
+training_window = "expanding"
+retrain_every = 1
+
+[[models]]
+name = "HAR"
+
+[evaluation]
+metrics = ["QLIKE", "log-RV MSE"]
+candidate = "HAR"
+baselines = []
+comparison_pairs = []
+
+[robustness]
+checks = ["monthly_losses", "largest_errors"]
+
+[plot]
+metric = "QLIKE"

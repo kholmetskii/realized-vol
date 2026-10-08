@@ -7,10 +7,18 @@ import pytest
 
 from rvol.application import WalkForwardExperiment
 from rvol.composition import standard_diagnostic_checks
-from rvol.domain import ComponentSpecification, ExperimentConfig, WalkForwardSettings
+from rvol.domain import (
+    ComponentSpecification,
+    ExperimentConfig,
+    RunIdentity,
+    TargetHorizon,
+    WalkForwardSettings,
+)
 from rvol.evaluation import (
     DiagnosticCheck,
     DiagnosticResult,
+    DieboldMarianoTest,
+    ForecastEvaluator,
     ForecastRobustnessAnalyzer,
     LagSensitivityCheck,
     LargestErrorsCheck,
@@ -67,6 +75,73 @@ def test_robustness_analyzer_calculates_all_predefined_checks():
     assert set(tables["monthly_losses"].metric) == {"QLIKE", "log-RV MSE"}
     assert len(tables["largest_errors"]) == 10
     assert set(tables["largest_errors"].model) == {"AR1", "EWMA", "HAR", "historical_mean", "naive"}
+
+
+def test_robustness_reuses_supplied_evaluation_without_recalculating_losses(monkeypatch):
+    experiment = experiment_result()
+    analysis = analyzer()
+    expected = analysis.analyze(experiment)
+    evaluation = analysis.evaluator.evaluate(experiment)
+
+    def unexpected_evaluation(self, experiment):
+        raise AssertionError("supplied losses must be reused, including in lag sensitivity")
+
+    monkeypatch.setattr(ForecastEvaluator, "evaluate", unexpected_evaluation)
+    assert analysis.analyze(experiment, evaluation=evaluation) == expected
+
+
+def test_lag_sensitivity_matches_independent_evaluations_for_each_test_setting():
+    experiment = experiment_result()
+    analysis = analyzer()
+    table = analysis.analyze(experiment).check("hac_sensitivity")
+    for lag in (0, 1):
+        evaluation = ForecastEvaluator(
+            comparison_pairs=tuple((baseline, "HAR") for baseline in analysis.baseline_models),
+            comparison_test=DieboldMarianoTest(lag),
+        ).evaluate(experiment)
+        actual = {
+            (row["metric"], row["baseline_model"], row["candidate_model"]): row
+            for row in table.records() if row["hac_lags"] == lag
+        }
+        for comparison in evaluation.comparisons:
+            row = actual[(comparison.metric, comparison.baseline_model, comparison.candidate_model)]
+            assert row["n_obs"] == comparison.n_obs
+            assert row["baseline_mean_loss"] == comparison.baseline_mean_loss
+            assert row["candidate_mean_loss"] == comparison.candidate_mean_loss
+            assert row["mean_loss_difference"] == comparison.mean_loss_difference
+            assert row["statistic"] == comparison.statistic
+            assert row["p_value"] == comparison.p_value
+            assert row["test_parameters"] == json.dumps(
+                dict(comparison.test_parameters), sort_keys=True,
+            )
+
+
+@pytest.mark.parametrize("change, message", [
+    (lambda result: replace(result, identity=RunIdentity("other")), "identity"),
+    (lambda result: replace(result, target_horizon=TargetHorizon(3, "cumulative")), "target"),
+    (lambda result: replace(result, instrument="GBP/USD"), "instrument"),
+    (lambda result: replace(result, losses=result.losses[:-1]), "one loss per forecast"),
+    (lambda result: replace(result, losses=(*result.losses, result.losses[0])),
+     "one loss per forecast"),
+    (lambda result: replace(result, losses=(
+        replace(result.losses[0], metric="other"), *result.losses[1:],
+    )), "configured metric"),
+    (lambda result: replace(result, losses=(
+        replace(result.losses[0], origin_date=None), *result.losses[1:],
+    )), "one loss per forecast"),
+    (lambda result: replace(result, losses=(
+        replace(result.losses[0], loss=-1.0), *result.losses[1:],
+    )), "finite and non-negative"),
+    (lambda result: replace(result, losses=(
+        replace(result.losses[0], loss=float("nan")), *result.losses[1:],
+    )), "finite and non-negative"),
+])
+def test_robustness_rejects_evaluation_that_does_not_match_the_experiment(change, message):
+    experiment = experiment_result()
+    analysis = analyzer()
+    evaluation = analysis.evaluator.evaluate(experiment)
+    with pytest.raises(ValueError, match=message):
+        analysis.analyze(experiment, evaluation=change(evaluation))
 
 
 def test_robustness_writer_is_deterministic_and_records_selected_check_settings(tmp_path):

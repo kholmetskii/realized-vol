@@ -1,5 +1,6 @@
 """Standard application assembly for reproducible forecast workflows."""
 
+from rvol.composition.configuration import experiment_run_from_mapping
 from rvol.composition.forecasting import (
     ROBUSTNESS_CHECK_NAMES,
     ExperimentDefinition,
@@ -15,6 +16,7 @@ __all__ = [
     "ROBUSTNESS_CHECK_NAMES",
     "ExperimentDefinition",
     "ExperimentRun",
+    "experiment_run_from_mapping",
     "holdout_experiment_definition",
     "run_standard_forecast_experiment",
     "standard_diagnostic_checks",

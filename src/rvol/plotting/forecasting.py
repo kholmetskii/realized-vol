@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import date
 
 import matplotlib.dates as mdates
@@ -39,8 +40,9 @@ def plot_forecast_evaluation(
     evaluation: EvaluationResult,
     *,
     candidate_model: str,
+    baseline_models: Sequence[str] | None = None,
     metric: str = "QLIKE",
-    title: str = "Out-of-sample realized-volatility forecasts",
+    title: str | None = None,
 ) -> Figure:
     """Plot forecast paths, mean losses, and cumulative candidate advantage."""
     if not experiment.records:
@@ -60,6 +62,13 @@ def plot_forecast_evaluation(
     if candidate_model not in models:
         raise ValueError(f"unknown candidate model: {candidate_model}")
     ordered_models = _model_order(models)
+    baselines = (
+        [model for model in ordered_models if model != candidate_model]
+        if baseline_models is None else list(baseline_models)
+    )
+    if len(set(baselines)) != len(baselines) or candidate_model in baselines \
+            or set(baselines).difference(models):
+        raise ValueError("plot baselines must be unique selected models other than the candidate")
     reference = records_by_model[candidate_model]
     target_dates = [record.target_date for record in reference]
     plot_dates = np.asarray(target_dates, dtype="datetime64[D]")
@@ -151,9 +160,7 @@ def plot_forecast_evaluation(
         )
 
     cumulative_axis.axhline(0, color="0.35", linewidth=0.9)
-    for baseline in ordered_models:
-        if baseline == candidate_model:
-            continue
+    for baseline in baselines:
         baseline_losses = losses_by_model[baseline]
         if set(baseline_losses) != set(target_dates):
             raise ValueError(f"evaluation does not contain aligned {metric} losses")
@@ -181,8 +188,15 @@ def plot_forecast_evaluation(
     candidate_label = MODEL_LABELS.get(candidate_model, candidate_model)
     cumulative_axis.set_title(f"Positive values favour {candidate_label}")
     cumulative_axis.grid(alpha=0.22)
-    cumulative_axis.legend(frameon=False, fontsize=9)
+    if baselines:
+        cumulative_axis.legend(frameon=False, fontsize=9)
 
+    if title is None:
+        instrument = None if experiment.config is None else experiment.config.instrument
+        title = (
+            (f"{instrument} " if instrument else "")
+            + "Out-of-sample realized-volatility forecasts"
+        )
     if horizon.sessions != 1 or horizon.kind != "session":
         title += f" — {horizon.kind} target, {horizon.sessions} sessions"
     figure.suptitle(title, fontsize=14)

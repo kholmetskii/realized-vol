@@ -18,9 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-rvol-evaluate-forecasts = "rvol.cli.evaluate_forecasts:main"
-rvol-forecast-plots = "rvol.cli.forecast_plots:main"
-rvol-robustness-report = "rvol.cli.robustness_report:main"
+rvol-run-experiment = "rvol.cli.run_experiment:main"
 
 [project.optional-dependencies]
 dev = [

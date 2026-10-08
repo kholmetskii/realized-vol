@@ -66,7 +66,7 @@ def test_artifacts_record_nondefault_settings_and_remain_deterministic(tmp_path,
     first = {path.name: path.read_bytes() for path in paths.all()}
     metadata = json.loads(paths.experiment.read_text())
 
-    assert metadata["schema_version"] == 8
+    assert metadata["schema_version"] == 9
     assert experiment.execution is not None
     assert metadata["execution"] == {
         "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",

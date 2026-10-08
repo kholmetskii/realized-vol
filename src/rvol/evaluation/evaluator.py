@@ -81,6 +81,7 @@ class EvaluationResult:
     comparison_test: ComponentSpecification | None = None
     identity: RunIdentity = field(default_factory=RunIdentity)
     target_horizon: TargetHorizon = field(default_factory=TargetHorizon)
+    instrument: str | None = None
 
 
 class ForecastEvaluator:
@@ -235,4 +236,5 @@ class ForecastEvaluator:
             comparison_test=test_specification if comparisons else None,
             identity=experiment.identity,
             target_horizon=experiment.target_horizon,
+            instrument=None if experiment.config is None else experiment.config.instrument,
         )

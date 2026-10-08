@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Generic, TypeVar, overload
 
 import pandas as pd
 
 from rvol.application import HoldoutExperiment, WalkForwardExperiment, prepare_forecast_data
 from rvol.domain import (
+    DescribedExecutionSettings,
     ExperimentConfig,
     ExperimentExecutorFactory,
     ExperimentResult,
@@ -22,6 +23,7 @@ from rvol.domain import (
     WalkForwardSettings,
 )
 from rvol.domain.contracts import ForecastComparisonTest, ForecastMetric
+from rvol.domain.specifications import ComponentSpecification
 from rvol.evaluation import (
     DiagnosticCheck,
     DieboldMarianoTest,
@@ -86,6 +88,8 @@ class ExperimentDefinition(Generic[Settings]):
             raise ValueError("models must have non-empty, unique names")
         if not self.metrics:
             raise ValueError("at least one metric is required")
+        if len(set(self.comparison_pairs)) != len(self.comparison_pairs):
+            raise ValueError("comparison pairs must be unique")
         references = {self.candidate_model, *self.baseline_models}
         references.update(name for pair in self.comparison_pairs for name in pair)
         missing = references.difference(names)
@@ -178,6 +182,66 @@ class ExperimentRun(Generic[Settings]):
 
     definition: ExperimentDefinition[Settings]
     config: ExperimentConfig[Settings]
+    diagnostic_checks: tuple[DiagnosticCheck, ...] = field(
+        default_factory=standard_diagnostic_checks,
+    )
+    plot_metric: str | None = None
+
+    def __post_init__(self) -> None:
+        metric_names = [metric.name for metric in self.definition.metrics]
+        if self.plot_metric is None:
+            object.__setattr__(self, "plot_metric", metric_names[0])
+        if self.plot_metric not in metric_names:
+            raise ValueError("plot metric must be one of the selected evaluation metrics")
+        self.definition.evaluator()
+        # Validate model inputs and diagnostic selection before loading a dataset.
+        _ = self.definition.specification
+        self.definition.robustness_analyzer(checks=self.diagnostic_checks)
+
+    @property
+    def resolved_configuration(self) -> dict[str, object]:
+        """Describe the actual components and settings, independent of their input source."""
+        settings = self.config.execution
+        if not isinstance(settings, DescribedExecutionSettings):
+            raise ValueError("resolved configuration requires described execution settings")
+
+        def component(value: ComponentSpecification) -> dict[str, object]:
+            return asdict(value) | {"parameters": dict(value.parameters)}
+
+        definition = self.definition
+        specification = definition.specification
+        return {
+            "dataset": {"instrument": self.config.instrument},
+            "run": {
+                **asdict(self.config.identity),
+                "forecast_start": (
+                    None if self.config.forecast_start is None
+                    else self.config.forecast_start.isoformat()
+                ),
+                "forecast_end": (
+                    None if self.config.forecast_end is None
+                    else self.config.forecast_end.isoformat()
+                ),
+            },
+            "execution": {
+                "settings": component(settings.specification.component),
+                "policies": {name: component(policy)
+                             for name, policy in settings.specification.policies},
+            },
+            "features": component(specification.features),
+            "target": component(specification.target),
+            "models": [component(model) for model in specification.models],
+            "evaluation": {
+                "metrics": [{"name": metric.name, "scale": metric.scale}
+                            for metric in definition.metrics],
+                "comparison_test": component(definition.comparison_test.specification),
+                "comparison_pairs": [list(pair) for pair in definition.comparison_pairs],
+                "candidate_model": definition.candidate_model,
+                "baseline_models": list(definition.baseline_models),
+            },
+            "robustness": [component(check.specification) for check in self.diagnostic_checks],
+            "plot": {"metric": self.plot_metric},
+        }
 
     def run(self, daily: pd.DataFrame) -> ExperimentResult:
         return self.definition.run(daily, self.config)

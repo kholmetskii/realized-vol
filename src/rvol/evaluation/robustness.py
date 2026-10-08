@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import date
 
 import numpy as np
@@ -27,7 +27,7 @@ from rvol.evaluation.diagnostics import (
     DiagnosticValue,
     validate_checks,
 )
-from rvol.evaluation.evaluator import ForecastEvaluator
+from rvol.evaluation.evaluator import EvaluationResult, ForecastEvaluator
 
 
 def _specification(
@@ -63,20 +63,28 @@ class LagSensitivityCheck:
             "candidate_mean_loss", "mean_loss_difference", "test_name", "statistic", "p_value",
             "test_parameters", "hac_lags",
         )
+        losses: dict[tuple[str, str], dict[date, float]] = defaultdict(dict)
+        for loss in context.evaluation.losses:
+            losses[(loss.metric, loss.model)][loss.target_date] = loss.loss
         for lag in self.hac_lags:
             test = self.test_factory(lag)
-            evaluation = ForecastEvaluator(
-                metrics=context.metrics, comparison_pairs=context.comparison_pairs,
-                comparison_test=test,
-            ).evaluate(context.experiment)
-            assert evaluation.comparison_test is not None
-            components.append((f"lag_{lag}", evaluation.comparison_test))
-            for comparison in evaluation.comparisons:
-                row = asdict(comparison) | {
-                    "test_parameters": json.dumps(dict(comparison.test_parameters), sort_keys=True),
-                    "hac_lags": lag,
-                }
-                rows.append(tuple(row[column] for column in columns))
+            specification = test.specification
+            components.append((f"lag_{lag}", specification))
+            for metric in context.metrics:
+                for baseline, candidate_model in context.comparison_pairs:
+                    candidate_losses = losses[(metric.name, candidate_model)]
+                    baseline_losses = losses[(metric.name, baseline)]
+                    dates = sorted(candidate_losses)
+                    candidate = np.array([candidate_losses[day] for day in dates])
+                    benchmark = np.array([baseline_losses[day] for day in dates])
+                    comparison = test.compare(benchmark.copy(), candidate.copy())
+                    rows.append((
+                        metric.name, baseline, candidate_model, len(dates),
+                        float(np.mean(benchmark)), float(np.mean(candidate)),
+                        float(np.mean(benchmark - candidate)), specification.name,
+                        comparison.statistic, comparison.p_value,
+                        json.dumps(dict(comparison.parameters), sort_keys=True), lag,
+                    ))
         rows.sort(key=lambda row: (row[0], row[1], row[2], row[-1]))
         return DiagnosticResult(
             self.specification, "Newey–West lag sensitivity", columns, tuple(rows),
@@ -195,6 +203,7 @@ class RobustnessResult:
     checks: tuple[DiagnosticResult, ...]
     identity: RunIdentity = field(default_factory=RunIdentity)
     target_horizon: TargetHorizon = field(default_factory=TargetHorizon)
+    instrument: str | None = None
 
     def check(self, name: str) -> DiagnosticResult:
         for result in self.checks:
@@ -221,9 +230,38 @@ class ForecastRobustnessAnalyzer:
         if candidate_model in self.baseline_models:
             raise ValueError("candidate_model must not also be a baseline")
 
-    def analyze(self, experiment: ExperimentResult) -> RobustnessResult:
+    def analyze(
+        self, experiment: ExperimentResult, *, evaluation: EvaluationResult | None = None,
+    ) -> RobustnessResult:
+        """Reuse supplied losses, or evaluate once for an independent Python call."""
+        if evaluation is None:
+            evaluation = self.evaluator.evaluate(experiment)
+        else:
+            if evaluation.identity != experiment.identity:
+                raise ValueError("evaluation identity must match the analyzed experiment")
+            if evaluation.target_horizon != experiment.target_horizon:
+                raise ValueError("evaluation target must match the analyzed experiment")
+            instrument = None if experiment.config is None else experiment.config.instrument
+            if evaluation.instrument != instrument:
+                raise ValueError("evaluation instrument must match the analyzed experiment")
+            expected = {
+                (record.model, metric.name, record.origin_date, record.target_start,
+                 record.target_date)
+                for record in experiment.records for metric in self.evaluator.metrics
+            }
+            actual = [
+                (loss.model, loss.metric, loss.origin_date, loss.target_start_date,
+                 loss.target_date)
+                for loss in evaluation.losses
+            ]
+            if not expected or len(actual) != len(expected) or set(actual) != expected:
+                raise ValueError(
+                    "evaluation must contain one loss per forecast and configured metric",
+                )
+            if any(not np.isfinite(loss.loss) or loss.loss < 0 for loss in evaluation.losses):
+                raise ValueError("evaluation losses must be finite and non-negative")
         context = DiagnosticContext(
-            experiment, self.evaluator.evaluate(experiment), self.evaluator.metrics,
+            experiment, evaluation, self.evaluator.metrics,
             self.candidate_model, self.baseline_models,
         )
         results = []
@@ -235,4 +273,5 @@ class ForecastRobustnessAnalyzer:
             results.append(result)
         return RobustnessResult(
             tuple(results), identity=experiment.identity, target_horizon=experiment.target_horizon,
+            instrument=context.evaluation.instrument,
         )

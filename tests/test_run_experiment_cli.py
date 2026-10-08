@@ -2,7 +2,6 @@ import json
 import subprocess
 import sys
 from datetime import date
-from importlib import import_module
 from pathlib import Path
 from typing import cast
 
@@ -11,7 +10,12 @@ import pandas as pd
 import pytest
 
 from rvol.application import HoldoutExperiment
-from rvol.composition import standard_experiment_definition
+from rvol.cli import run_experiment
+from rvol.composition import (
+    ExperimentRun,
+    standard_diagnostic_checks,
+    standard_experiment_definition,
+)
 from rvol.domain import (
     EveryNSessions,
     ExpandingWindow,
@@ -23,7 +27,11 @@ from rvol.domain import (
     TargetHorizon,
     WalkForwardSettings,
 )
-from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter, RobustnessArtifactWriter
+from rvol.reporting import (
+    DatasetSnapshot,
+    ForecastArtifactWriter,
+    RobustnessArtifactWriter,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -68,7 +76,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
     completed = subprocess.run(
         [
             sys.executable,
-            "scripts/evaluate_forecasts.py",
+            "scripts/run_experiment.py",
             str(source),
             "--min-train-size",
             "20",
@@ -136,7 +144,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
     assert len(forecasts) == 30
     assert len(summaries) == 10
     assert len(comparisons) == 2 * len(expected_pairs)
-    assert metadata["schema_version"] == 8
+    assert metadata["schema_version"] == 9
     assert metadata["execution"] == {
         "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",
         "settings": {
@@ -230,7 +238,7 @@ def test_forecast_cli_strategy_matches_the_python_run(
     window_args = ["--window-size", "25"] if training_window == "rolling" else []
     completed = subprocess.run(
         [
-            sys.executable, "scripts/evaluate_forecasts.py", str(source),
+            sys.executable, "scripts/run_experiment.py", str(source),
             "--min-train-size", "20", "--training-window", training_window, *window_args,
             "--retrain-every", "5", "--forecast-start", start.isoformat(),
             "--horizon", str(sessions), "--target-kind", kind,
@@ -248,6 +256,7 @@ def test_forecast_cli_strategy_matches_the_python_run(
     expected = ForecastArtifactWriter(tmp_path / "expected").write(
         experiment, definition.evaluator().evaluate(experiment), config=config,
         dataset=DatasetSnapshot.from_frame(source, daily), specification=definition.specification,
+        configuration=ExperimentRun(definition, config).resolved_configuration,
     )
     assert {path.name: path.read_bytes() for path in expected.all()} == {
         path.name: (output / path.name).read_bytes() for path in expected.all()
@@ -262,144 +271,115 @@ def test_forecast_cli_strategy_matches_the_python_run(
 
 
 @pytest.mark.parametrize("metric", [None, "log-RV MSE"], ids=["default_metric", "log_mse"])
-def test_plot_cli_uses_the_shared_experiment_and_metric_choices(tmp_path, daily_dataset, metric):
+def test_plot_option_uses_the_shared_experiment_and_metric_choices(tmp_path, daily_dataset, metric):
     source, _ = daily_dataset
-    output = tmp_path / "forecast.png"
+    output = tmp_path / "artifacts"
     metric_args = [] if metric is None else ["--metric", metric]
-
     completed = subprocess.run(
         [
-            sys.executable, "scripts/forecast_plots.py", str(source),
+            sys.executable, "scripts/run_experiment.py", str(source),
             "--min-train-size", "20", "--forecast-start", "2022-03-14",
-            "--forecast-end", "2022-03-21", "--out", str(output), *metric_args,
+            "--forecast-end", "2022-03-21", "--plot", "--output-dir", str(output), *metric_args,
         ],
         cwd=PROJECT_ROOT, check=False, capture_output=True, text=True,
     )
-
     assert completed.returncode == 0, completed.stderr
     assert "targets: 6" in completed.stdout
-    assert f"metric:  {metric or 'QLIKE'}" in completed.stdout
-    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-
-
-def test_plot_cli_passes_the_requested_strategy_forecasts_to_the_plot(
-    tmp_path, daily_dataset, monkeypatch,
-):
-    from rvol.cli import forecast_plots
-
-    source, daily = daily_dataset
-    output = tmp_path / "rolling.png"
-    expected = standard_experiment_definition().run(daily, ExperimentConfig(
-        execution=WalkForwardSettings(RollingWindow(25), EveryNSessions(5), min_train_size=20),
-        forecast_start=date(2022, 3, 14),
-        forecast_end=date(2022, 3, 21),
-    ))
-    captured: list[ExperimentResult] = []
-    plot = forecast_plots.plot_forecast_evaluation
-
-    def capture(experiment, *args, **kwargs):
-        captured.append(experiment)
-        return plot(experiment, *args, **kwargs)
-
-    monkeypatch.setattr(forecast_plots, "plot_forecast_evaluation", capture)
-    monkeypatch.setattr(sys, "argv", [
-        "forecast_plots", str(source), "--min-train-size", "20",
-        "--training-window", "rolling", "--window-size", "25", "--retrain-every", "5",
-        "--forecast-start", "2022-03-14", "--forecast-end", "2022-03-21", "--out", str(output),
-    ])
-
-    forecast_plots.main()
-
-    assert captured == [expected]
-    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert f"plot metric: {metric or 'QLIKE'}" in completed.stdout
+    assert (output / "forecasts.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert (output / "forecasts.csv").exists()
+    assert not (output / "robustness").exists()
 
 
 @pytest.mark.parametrize("rolling", [False, True], ids=["default", "rolling_refit"])
-def test_robustness_cli_uses_shared_baselines_and_preserves_option_overrides(
+def test_robustness_option_preserves_overrides_and_matches_the_python_api(
     tmp_path, daily_dataset, rolling,
 ):
     source, daily = daily_dataset
-    output = tmp_path / "robustness"
+    output = tmp_path / "artifacts"
     strategy_args = (
         ["--training-window", "rolling", "--window-size", "25", "--retrain-every", "5"]
         if rolling else []
     )
-
     completed = subprocess.run(
         [
-            sys.executable, "scripts/robustness_report.py", str(source),
+            sys.executable, "scripts/run_experiment.py", str(source),
             "--min-train-size", "20", "--forecast-start", "2022-03-14",
-            "--forecast-end", "2022-03-21", "--max-hac-lag", "1",
+            "--forecast-end", "2022-03-21", "--robustness", "--max-hac-lag", "1",
             "--top-errors", "2", "--output-dir", str(output), *strategy_args,
         ],
         cwd=PROJECT_ROOT, check=False, capture_output=True, text=True,
     )
-
     assert completed.returncode == 0, completed.stderr
-    assert "targets:          6" in completed.stdout
-    comparisons = pd.read_csv(output / "hac_sensitivity.csv")
+    assert "targets: 6" in completed.stdout
+    diagnostics = output / "robustness"
+    comparisons = pd.read_csv(diagnostics / "hac_sensitivity.csv")
     assert len(comparisons) == 16
     assert set(comparisons["hac_lags"]) == {0, 1}
     assert set(comparisons["candidate_model"]) == {"HAR"}
     assert set(comparisons["baseline_model"]) == {"naive", "EWMA", "AR1", "historical_mean"}
-    assert len(pd.read_csv(output / "largest_errors.csv")) == 10
-    assert len(pd.read_csv(output / "win_rates.csv")) == 8
-
+    assert len(pd.read_csv(diagnostics / "largest_errors.csv")) == 10
+    assert len(pd.read_csv(diagnostics / "win_rates.csv")) == 8
+    assert (output / "forecasts.csv").exists()
+    assert not (output / "forecasts.png").exists()
     if rolling:
         definition = standard_experiment_definition()
-        experiment = definition.run(daily, ExperimentConfig(
+        config = ExperimentConfig(
             execution=WalkForwardSettings(RollingWindow(25), EveryNSessions(5), min_train_size=20),
-            forecast_start=date(2022, 3, 14),
-            forecast_end=date(2022, 3, 21),
-        ))
+            forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
+        )
+        experiment = definition.run(daily, config)
         expected = RobustnessArtifactWriter(tmp_path / "expected").write(
             definition.robustness_analyzer(hac_lags=(0, 1), top_errors=2).analyze(experiment),
+            configuration=ExperimentRun(
+                definition, config,
+                diagnostic_checks=standard_diagnostic_checks(hac_lags=(0, 1), top_errors=2),
+            ).resolved_configuration,
         )
-        assert {path.name: path.read_bytes() for path in expected.all()} == {
-            path.name: (output / path.name).read_bytes() for path in expected.all()
+        assert {p.name: p.read_bytes() for p in expected.all()} == {
+            p.name: (diagnostics / p.name).read_bytes() for p in expected.all()
         }
 
 
-@pytest.mark.parametrize("module", ["evaluate_forecasts", "forecast_plots", "robustness_report"])
 @pytest.mark.parametrize("arguments, message", [
     (["--horizon", "0"], "expected a positive integer"),
     (["--target-kind", "unknown"], "invalid choice"),
-    (["--training-window", "rolling"], "--window-size is required"),
-    (["--executor", "holdout"], "--train-end is required"),
-    (["--train-end", "2024-12-31"], "--train-end requires --executor holdout"),
-    (["--update-observations"], "--update-observations requires --executor holdout"),
+    (["--training-window", "rolling"], "execution.window_size is required"),
+    (["--executor", "holdout"], "execution.train_end is required"),
+    (["--train-end", "2024-12-31"], "execution.train_end requires execution.name = 'holdout'"),
+    (["--update-observations"],
+     "execution.update_observations requires execution.name = 'holdout'"),
     (["--executor", "holdout", "--train-end", "2024-12-31", "--training-window", "expanding"],
-     "--training-window requires --executor walk-forward"),
+     "execution.training_window requires execution.name = 'walk-forward'"),
     (["--executor", "holdout", "--train-end", "2024-12-31", "--window-size", "504"],
-     "--window-size requires --executor walk-forward"),
+     "execution.window_size requires execution.name = 'walk-forward'"),
     (["--executor", "holdout", "--train-end", "2024-12-31", "--retrain-every", "1"],
-     "--retrain-every requires --executor walk-forward"),
+     "execution.retrain_every requires execution.name = 'walk-forward'"),
 ])
-def test_all_forecast_commands_validate_execution_options_before_loading_data(
-    tmp_path, monkeypatch, capsys, module, arguments, message,
+def test_command_validates_execution_options_before_loading_data(
+    monkeypatch, capsys, arguments, message,
 ):
-    command = import_module(f"rvol.cli.{module}")
-    monkeypatch.setattr(sys, "argv", [
-        module, str(tmp_path / "missing.parquet"), *arguments,
-    ])
+    def unexpected_load(self):
+        raise AssertionError("invalid options must fail before data I/O")
 
+    monkeypatch.setattr(run_experiment.ParquetDatasetRepository, "load", unexpected_load)
+    monkeypatch.setattr(sys, "argv", ["run_experiment", "missing.parquet", *arguments])
     with pytest.raises(SystemExit) as error:
-        command.main()
-
+        run_experiment.main()
     assert error.value.code == 2
     assert message in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("module", ["evaluate_forecasts", "forecast_plots", "robustness_report"])
 @pytest.mark.parametrize("update", [False, True])
 @pytest.mark.parametrize(
     "sessions, target_kind", [(1, "session"), (3, "session"), (3, "cumulative")],
 )
-def test_all_forecast_commands_use_holdout_results_from_the_python_api(
-    tmp_path, daily_dataset, monkeypatch, module, update, sessions, target_kind,
+def test_all_outputs_use_holdout_results_from_the_python_api(
+    tmp_path, daily_dataset, monkeypatch, update, sessions, target_kind,
 ):
+    from rvol.plotting import forecasting
+
     source, daily = daily_dataset
-    command = import_module(f"rvol.cli.{module}")
     definition = standard_experiment_definition(
         executor_factory=HoldoutExperiment, target_horizon=TargetHorizon(sessions, target_kind),
     )
@@ -409,79 +389,111 @@ def test_all_forecast_commands_use_holdout_results_from_the_python_api(
         forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
     )
     expected = definition.run(daily, config)
+    checks = standard_diagnostic_checks(hac_lags=(0, 1), top_errors=2)
+    configuration = ExperimentRun(definition, config, checks).resolved_configuration
     output = tmp_path / "holdout"
-    args = [
-        module, str(source), "--executor", "holdout", "--train-end", "2022-03-04",
+    captured: list[ExperimentResult] = []
+    plot = forecasting.plot_forecast_evaluation
+
+    def capture(experiment, *args, **kwargs):
+        captured.append(experiment)
+        return plot(experiment, *args, **kwargs)
+
+    monkeypatch.setattr(forecasting, "plot_forecast_evaluation", capture)
+    monkeypatch.setattr(sys, "argv", [
+        "run_experiment", str(source), "--executor", "holdout", "--train-end", "2022-03-04",
         "--run-id", "holdout_check", "--fold-id", "fold_1",
         "--horizon", str(sessions), "--target-kind", target_kind,
         "--min-train-size", "20", "--forecast-start", "2022-03-14",
         "--forecast-end", "2022-03-21", *(["--update-observations"] if update else []),
-    ]
-    captured: list[ExperimentResult] = []
-    if module == "forecast_plots":
-        plot = command.plot_forecast_evaluation
-
-        def capture(experiment, *plot_args, **kwargs):
-            captured.append(experiment)
-            return plot(experiment, *plot_args, **kwargs)
-
-        monkeypatch.setattr(command, "plot_forecast_evaluation", capture)
-        args += ["--out", str(output.with_suffix(".png"))]
-    else:
-        args += ["--output-dir", str(output)]
-        if module == "robustness_report":
-            args += ["--max-hac-lag", "1", "--top-errors", "2"]
-    monkeypatch.setattr(sys, "argv", args)
-
-    command.main()
-
-    if module == "forecast_plots":
-        assert captured == [expected]
-        assert output.with_suffix(".png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-        return
-    if module == "evaluate_forecasts":
-        paths = ForecastArtifactWriter(tmp_path / "expected").write(
-            expected, definition.evaluator().evaluate(expected), config=config,
-            dataset=DatasetSnapshot.from_frame(source, daily),
-            specification=definition.specification,
-        ).all()
-    else:
-        paths = RobustnessArtifactWriter(tmp_path / "expected").write(
-            definition.robustness_analyzer(hac_lags=(0, 1), top_errors=2).analyze(expected),
-        ).all()
-    assert {p.name: p.read_bytes() for p in paths} == {
-        p.name: (output / p.name).read_bytes() for p in paths
-    }
+        "--plot", "--robustness", "--max-hac-lag", "1", "--top-errors", "2",
+        "--output-dir", str(output),
+    ])
+    run_experiment.main()
+    assert captured == [expected]
+    assert (output / "forecasts.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    evaluation = definition.evaluator().evaluate(expected)
+    numeric_paths = ForecastArtifactWriter(tmp_path / "expected").write(
+        expected, evaluation, config=config, dataset=DatasetSnapshot.from_frame(source, daily),
+        specification=definition.specification, configuration=configuration,
+    ).all()
+    robust_paths = RobustnessArtifactWriter(tmp_path / "expected" / "robustness").write(
+        definition.robustness_analyzer(checks=checks).analyze(expected, evaluation=evaluation),
+        configuration=configuration,
+    ).all()
+    for directory, paths in ((output, numeric_paths), (output / "robustness", robust_paths)):
+        assert {p.name: p.read_bytes() for p in paths} == {
+            p.name: (directory / p.name).read_bytes() for p in paths
+        }
 
 
-def test_robustness_command_runs_only_selected_checks_on_a_short_report(
-    tmp_path, daily_dataset, monkeypatch,
-):
-    from rvol.cli import robustness_report
-
+def test_selected_descriptive_checks_work_on_a_short_report(tmp_path, daily_dataset, monkeypatch):
     source, _ = daily_dataset
     output = tmp_path / "monthly"
     monkeypatch.setattr(sys, "argv", [
-        "robustness_report", str(source), "--min-train-size", "20",
+        "run_experiment", str(source), "--min-train-size", "20",
         "--forecast-start", "2022-03-14", "--forecast-end", "2022-03-14",
-        "--check", "monthly_losses", "--output-dir", str(output),
+        "--baselines", "--robustness", "--check", "monthly_losses", "--output-dir", str(output),
     ])
-    robustness_report.main()
-
-    assert {path.name for path in output.iterdir()} == {
+    run_experiment.main()
+    assert {path.name for path in (output / "robustness").iterdir()} == {
         "monthly_losses.csv", "robustness.md", "robustness.json",
     }
-    metadata = json.loads((output / "robustness.json").read_text())
+    metadata = json.loads((output / "robustness" / "robustness.json").read_text())
     assert [item["specification"]["name"] for item in metadata["checks"]] == ["monthly_losses"]
 
 
-def test_robustness_command_rejects_duplicate_checks_before_loading_data(monkeypatch, capsys):
-    from rvol.cli import robustness_report
-
+def test_duplicate_checks_fail_before_loading_data(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", [
-        "robustness_report", "missing.parquet", "--check", "win_rates", "--check", "win_rates",
+        "run_experiment", "missing.parquet", "--robustness",
+        "--check", "win_rates", "--check", "win_rates",
     ])
     with pytest.raises(SystemExit) as error:
-        robustness_report.main()
+        run_experiment.main()
     assert error.value.code == 2
     assert "unique" in capsys.readouterr().err
+
+
+def test_default_output_directory_contains_only_numerical_results(
+    tmp_path, daily_dataset, monkeypatch,
+):
+    source, _ = daily_dataset
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["run_experiment", str(source), "--min-train-size", "20"])
+    run_experiment.main()
+    assert {path.name for path in (tmp_path / "outputs" / "experiment").iterdir()} == {
+        "forecasts.csv", "loss_summary.csv", "comparisons.csv", "experiment.json",
+    }
+
+
+@pytest.mark.parametrize("reports", [[], ["--plot", "--robustness"]], ids=["numbers", "reports"])
+def test_single_model_run_needs_no_comparison_configuration(
+    tmp_path, daily_dataset, monkeypatch, reports,
+):
+    source, _ = daily_dataset
+    output = tmp_path / "single"
+    monkeypatch.setattr(sys, "argv", [
+        "run_experiment", str(source), "--models", "HAR", "--min-train-size", "20",
+        "--output-dir", str(output), *reports,
+    ])
+    run_experiment.main()
+    forecasts = pd.read_csv(output / "forecasts.csv")
+    assert set(forecasts.model) == {"HAR"}
+    assert pd.read_csv(output / "comparisons.csv").empty
+    assert (output / "forecasts.png").exists() == ("--plot" in reports)
+    if "--robustness" in reports:
+        assert {p.name for p in (output / "robustness").iterdir()} == {
+            "monthly_losses.csv", "largest_errors.csv", "robustness.md", "robustness.json",
+        }
+
+
+def test_empty_experiment_does_not_write_outputs(tmp_path, daily_dataset, monkeypatch):
+    source, _ = daily_dataset
+    output = tmp_path / "empty"
+    monkeypatch.setattr(sys, "argv", [
+        "run_experiment", str(source), "--forecast-start", "2030-01-01",
+        "--output-dir", str(output), "--plot", "--robustness",
+    ])
+    with pytest.raises(SystemExit, match="no forecasts"):
+        run_experiment.main()
+    assert not output.exists()

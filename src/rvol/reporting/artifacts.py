@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import date
 
@@ -19,6 +20,7 @@ from rvol.domain import (
 from rvol.domain.specifications import ExperimentSpecification
 from rvol.evaluation import EvaluationResult
 from rvol.reporting._files import atomic_csv, atomic_text
+from rvol.reporting._metadata import configuration_payload
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,7 @@ class ForecastArtifactWriter:
         config: ExperimentConfig[DescribedExecutionSettings],
         dataset: DatasetSnapshot,
         specification: ExperimentSpecification,
+        configuration: Mapping[str, object] | None = None,
     ) -> ForecastArtifactPaths:
         """Write forecasts, aggregate losses, comparisons, and run metadata."""
         if not experiment.records:
@@ -113,6 +116,7 @@ class ForecastArtifactWriter:
             raise ValueError("forecast records must include fit dates and training boundaries")
         if evaluation.comparisons and evaluation.comparison_test is None:
             raise ValueError("comparisons must include their test specification")
+        resolved = configuration_payload(configuration)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         paths = ForecastArtifactPaths(
             forecasts=self.output_dir / "forecasts.csv",
@@ -215,7 +219,8 @@ class ForecastArtifactWriter:
             for item in evaluation.comparisons
         ))
         payload = {
-            "schema_version": 8,
+            "schema_version": 9,
+            "resolved_configuration": resolved,
             "identity": asdict(experiment.identity),
             "target": _component_payload(experiment.target_horizon.specification),
             "execution": {
@@ -236,6 +241,7 @@ class ForecastArtifactWriter:
                 ],
             },
             "dataset": {
+                "instrument": config.instrument,
                 "source": dataset.source,
                 "sha256": dataset.sha256,
                 "rows": dataset.n_rows,

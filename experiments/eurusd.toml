@@ -1,0 +1,63 @@
+version = 1
+
+[dataset]
+instrument = "EUR/USD"
+
+[run]
+run_id = "eurusd_baseline"
+forecast_start = 2025-01-01
+forecast_end = 2026-09-30
+
+[target]
+name = "realized_variance"
+date_col = "date"
+rv_col = "log_rv"
+sessions = 1
+kind = "session"
+
+[execution]
+name = "walk-forward"
+min_train_size = 252
+training_window = "expanding"
+retrain_every = 1
+
+[features]
+name = "HAR"
+date_col = "date"
+rv_col = "log_rv"
+weekly_window = 5
+monthly_window = 22
+max_gap_days = 7
+
+[[models]]
+name = "historical_mean"
+
+[[models]]
+name = "naive"
+
+[[models]]
+name = "EWMA"
+decay = 0.94
+
+[[models]]
+name = "AR1"
+
+[[models]]
+name = "HAR"
+
+[evaluation]
+metrics = ["QLIKE", "log-RV MSE"]
+candidate = "HAR"
+baselines = ["naive", "EWMA", "AR1", "historical_mean"]
+comparison_pairs = [["naive", "HAR"]]
+
+[evaluation.test]
+name = "DM"
+
+[robustness]
+checks = ["hac_sensitivity", "win_rates", "monthly_losses", "largest_errors"]
+hac_lags = [0, 1, 2, 3, 4, 5]
+top_errors = 5
+
+[plot]
+metric = "QLIKE"

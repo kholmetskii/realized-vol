@@ -70,7 +70,7 @@ class ValidationArtifactWriter:
             paths.aggregate_summaries,
         )
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
             "target": asdict(horizon),
             "aggregation": validation.aggregation,
             "overlap_policy": "keep_separate_run_fold_forecasts",
@@ -78,6 +78,7 @@ class ValidationArtifactWriter:
             "runs": [
                 {
                     "identity": asdict(run.identity),
+                    "instrument": run.instrument,
                     "forecast_cases": len({(item.model, item.target_date) for item in run.losses}),
                     "comparison_test": None if run.comparison_test is None else (
                         asdict(run.comparison_test)
