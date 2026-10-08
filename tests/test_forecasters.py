@@ -3,7 +3,7 @@ from dataclasses import FrozenInstanceError
 import numpy as np
 import pytest
 
-from rvol.domain import Forecaster
+from rvol.domain import FittedForecaster, Forecaster
 from rvol.models import (
     AR1Forecaster,
     EWMAForecaster,
@@ -18,23 +18,36 @@ def assign_attribute(instance: object, name: str, value: object) -> None:
     setattr(instance, name, value)
 
 
-def test_all_forecasters_implement_the_common_contract():
-    models: list[Forecaster] = [
-        HistoricalMeanForecaster(),
-        NaiveForecaster(),
-        EWMAForecaster(),
-        AR1Forecaster(),
-        HARForecaster(),
-    ]
+@pytest.mark.parametrize(
+    "model, expected_variance",
+    [
+        pytest.param(HistoricalMeanForecaster(), 3.0, id="historical_mean"),
+        pytest.param(NaiveForecaster(), 9.0, id="naive"),
+        pytest.param(EWMAForecaster(decay=0.5), 6.0, id="EWMA"),
+        pytest.param(AR1Forecaster(), 3.0, id="AR1"),
+        pytest.param(HARForecaster(), 5.0, id="HAR"),
+    ],
+)
+def test_forecasters_share_the_log_variance_fit_predict_contract(
+    model: Forecaster, expected_variance: float,
+):
+    training = np.zeros((4, len(model.feature_names)))
+    target = np.log([1.0, 9.0, 1.0, 9.0])
+    current = np.full((2, len(model.feature_names)), np.log(9.0))
+    original_training = training.copy()
+    original_target = target.copy()
+    original_current = current.copy()
 
-    assert all(isinstance(model, Forecaster) for model in models)
-    assert [model.name for model in models] == [
-        "historical_mean",
-        "naive",
-        "EWMA",
-        "AR1",
-        "HAR",
-    ]
+    fitted = model.fit(training, target)
+    predicted = fitted.predict(current)
+
+    assert isinstance(model, Forecaster)
+    assert isinstance(fitted, FittedForecaster)
+    assert predicted.shape == (2,)
+    np.testing.assert_allclose(predicted, np.log([expected_variance] * 2))
+    np.testing.assert_array_equal(training, original_training)
+    np.testing.assert_array_equal(target, original_target)
+    np.testing.assert_array_equal(current, original_current)
 
 
 def test_historical_mean_predicts_the_training_target_mean():
@@ -96,6 +109,7 @@ def test_har_forecaster_recovers_known_coefficients_without_mutating_inputs():
 
     assert np.isclose(fitted.intercept, 0.4)
     np.testing.assert_allclose(fitted.coefficients, [0.5, 0.3, 0.1])
+    np.testing.assert_allclose(predicted, target[:4])
     assert predicted.shape == (4,)
     assert np.isfinite(predicted).all()
     np.testing.assert_array_equal(features, original_features)

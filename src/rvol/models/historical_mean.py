@@ -10,7 +10,10 @@ from rvol.models.predictors import ConstantPredictor
 
 
 class HistoricalMeanForecaster:
-    """Predict the mean log RV observed in the training sample."""
+    """Predict the mean log RV observed in the training sample.
+
+    Exponentiating gives the geometric mean of past realized variances.
+    """
 
     name = "historical_mean"
     feature_names: tuple[str, ...] = ()

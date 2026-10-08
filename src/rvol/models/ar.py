@@ -7,7 +7,11 @@ from rvol.models.linear import LinearPredictor, fit_ols
 
 
 class AR1Forecaster:
-    """Regress next-session log RV on current-session log RV."""
+    """Regress next-session log RV on current-session log RV.
+
+    Return the OLS estimate of mean log variance. Exponentiating gives a
+    geometric-mean variance forecast under the log regression model.
+    """
 
     name = "AR1"
     feature_names = ("rv_daily",)

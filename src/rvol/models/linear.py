@@ -12,7 +12,7 @@ from rvol.models._validation import validated_features, validated_training_data
 
 @dataclass(frozen=True)
 class LinearPredictor:
-    """Immutable fitted linear regression coefficients."""
+    """Immutable fitted linear predictor returning log-variance forecasts."""
 
     intercept: float
     coefficients: tuple[float, ...]

@@ -62,6 +62,30 @@ new object into `WalkForwardExperiment`. The experiment and evaluator do not
 need model-specific branches. Tests enforce the dependency direction so an
 inner layer cannot accidentally import an outer adapter.
 
+All models share one array-based interface: `fit(features, target)` returns a
+fitted object with `predict(features)`. Features are two-dimensional arrays
+with columns in `model.feature_names` order; training targets are
+one-dimensional arrays of observed log realised variance. Both operations
+leave their inputs unchanged. Predictions are one-dimensional arrays with one
+finite log variance per row, representing finite positive variances after
+exponentiation.
+
+The HAR-specific `fit_har` function and `HarModel` DataFrame wrapper have been
+removed. Convert DataFrames to arrays at the call site and use the common API:
+
+    from rvol.models import HARForecaster
+
+    model = HARForecaster()
+    columns = list(model.feature_names)
+    fitted = model.fit(
+        training.loc[:, columns].to_numpy(dtype="float64"),
+        training["target"].to_numpy(dtype="float64"),
+    )
+    predicted_log_rv = fitted.predict(current.loc[:, columns].to_numpy(dtype="float64"))
+
+Fitted coefficients are available as `fitted.intercept` and
+`fitted.coefficients`, with slopes in `model.feature_names` order.
+
 ## Reproduce the plots
 
     python scripts/sampling_plot.py
@@ -135,8 +159,17 @@ The correction uses only residuals from the eligible training window and is
 recomputed before every forecast. A log-sum-exp calculation avoids overflowing
 the exponentials. The correction assumes that the training residual distribution
 represents current forecast uncertainty, so it can improve QLIKE while worsening
-log-MSE. It is part of the single `HAR` implementation, shared by
-`HARForecaster` and the DataFrame convenience function `fit_har`.
+log-MSE. It is part of the single `HARForecaster.fit` implementation.
+
+The common output scale does not imply a common statistical target:
+
+| Model | Meaning of the forecast after exponentiating its log output |
+|---|---|
+| Historical mean | Geometric mean of training realised variances |
+| Naïve | Current session's realised variance |
+| EWMA | Exponentially weighted average of past realised variances |
+| AR(1) | Geometric-mean variance forecast from the log regression |
+| HAR | Mean-variance estimate using the training-residual correction |
 
 Run the complete out-of-sample comparison with:
 
