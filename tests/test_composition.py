@@ -20,6 +20,7 @@ def test_standard_forecasters_define_the_project_model_set():
     assert [model.name for model in standard_forecasters()] == [
         "historical_mean",
         "naive",
+        "EWMA",
         "AR1",
         "HAR",
     ]
@@ -31,6 +32,6 @@ def test_standard_experiment_builds_features_and_runs_every_model():
         ExperimentConfig(min_train_size=10),
     )
 
-    assert result.models == ("AR1", "HAR", "historical_mean", "naive")
-    assert result.n_forecasts == 72
+    assert result.models == ("AR1", "EWMA", "HAR", "historical_mean", "naive")
+    assert result.n_forecasts == 90
     assert {record.n_train for record in result.records} == set(range(10, 28))

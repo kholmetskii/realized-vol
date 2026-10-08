@@ -8,6 +8,7 @@ from rvol.application import WalkForwardExperiment
 from rvol.domain import ExperimentConfig
 from rvol.models import (
     AR1Forecaster,
+    EWMAForecaster,
     HARForecaster,
     HistoricalMeanForecaster,
     NaiveForecaster,
@@ -33,6 +34,7 @@ def all_models():
     return (
         HistoricalMeanForecaster(),
         NaiveForecaster(),
+        EWMAForecaster(),
         AR1Forecaster(),
         HARForecaster(),
     )
@@ -54,8 +56,8 @@ def test_experiment_runs_every_model_on_identical_expanding_windows():
 
     result = experiment.run(feature_sample())
 
-    assert result.models == ("AR1", "HAR", "historical_mean", "naive")
-    assert result.n_forecasts == 100
+    assert result.models == ("AR1", "EWMA", "HAR", "historical_mean", "naive")
+    assert result.n_forecasts == 125
     for model in result.models:
         records = [record for record in result.records if record.model == model]
         assert len(records) == 25

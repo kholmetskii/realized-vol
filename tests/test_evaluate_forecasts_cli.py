@@ -57,7 +57,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
     assert completed.returncode == 0, completed.stderr
     assert "targets: 6" in completed.stdout
     assert f"period:  {start} .. {end}" in completed.stdout
-    for model in ("historical_mean", "naive", "AR1", "HAR"):
+    for model in ("historical_mean", "naive", "EWMA", "AR1", "HAR"):
         assert model in completed.stdout
     assert "QLIKE" in completed.stdout
     assert "log-RV MSE" in completed.stdout
@@ -90,8 +90,8 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
         "actual_rv",
         "predicted_rv",
     ]
-    assert len(forecasts) == 24
-    assert len(summaries) == 8
+    assert len(forecasts) == 30
+    assert len(summaries) == 10
     assert len(comparisons) == 4
     assert metadata["schema_version"] == 1
     assert metadata["dataset"]["rows"] == n_sessions
@@ -102,7 +102,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(tmp_path):
         "configured_forecast_end": end,
         "configured_forecast_start": start,
         "min_train_size": 20,
-        "models": ["AR1", "HAR", "historical_mean", "naive"],
+        "models": ["AR1", "EWMA", "HAR", "historical_mean", "naive"],
         "target_count": 6,
     }
     assert metadata["evaluation"]["hac_lags"] == 2

@@ -116,10 +116,12 @@ one-session-ahead HAR-RV rows. Each row records its forecast origin and target
 dates explicitly, using the current session, latest five sessions, and latest
 22 sessions as predictors of the following session's log realised variance.
 
-`rvol.application.WalkForwardExperiment` runs historical-mean, naïve, AR(1),
-and HAR-RV forecasters over identical expanding windows. Training outcomes are
-admitted only after their target dates have become observable, preventing
-future information from leaking into a forecast.
+`rvol.application.WalkForwardExperiment` runs historical-mean, naïve,
+fixed-decay EWMA, AR(1), and HAR-RV forecasters over identical expanding windows.
+EWMA uses a fixed 0.94 decay on the variance scale,
+evaluated in log space for numerical stability. Training outcomes are admitted
+only after their target dates have become observable, preventing future
+information from leaking into a forecast.
 
 Run the complete out-of-sample comparison with:
 
@@ -129,14 +131,17 @@ Run the complete out-of-sample comparison with:
         --forecast-start 2024-01-01 \
         --forecast-end 2024-03-31 \
         --compare naive HAR \
+        --compare EWMA HAR \
         --compare AR1 HAR \
         --compare historical_mean HAR \
         --output-dir outputs/final_evaluation
 
 The report shows mean QLIKE and log-RV squared loss for every model, followed
-by a one-sided Diebold-Mariano test of whether HAR has lower expected loss than
-the naïve benchmark. The test uses a Newey-West long-run variance estimate for
-serially correlated loss differences; a positive difference favours HAR.
+by one-sided Diebold-Mariano tests of whether each requested candidate has
+lower expected loss than its baseline. Without `--compare`, the default test
+compares HAR with the naïve benchmark. The tests use a Newey-West long-run
+variance estimate for serially correlated loss differences; a positive
+difference favours the candidate.
 When `--output-dir` is provided, the same run also writes normalized forecasts,
 mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
 records dataset coverage and a SHA-256 fingerprint so the exact input can be
@@ -167,6 +172,10 @@ Run the offline quality checks with:
     mypy src tests
 
 ## Results
+
+The archived results below are the original four-model Q1 2024 experiment,
+before EWMA was added. Evaluation on an already inspected period is exploratory
+rather than a fresh confirmatory test.
 
 ### 1. How far can you sample before noise takes over?
 

@@ -9,6 +9,7 @@ from rvol.domain import ExperimentConfig, ExperimentResult, Forecaster
 from rvol.features.forecasting import build_har_features
 from rvol.models import (
     AR1Forecaster,
+    EWMAForecaster,
     HARForecaster,
     HistoricalMeanForecaster,
     NaiveForecaster,
@@ -20,6 +21,7 @@ def standard_forecasters() -> tuple[Forecaster, ...]:
     return (
         HistoricalMeanForecaster(),
         NaiveForecaster(),
+        EWMAForecaster(),
         AR1Forecaster(),
         HARForecaster(),
     )

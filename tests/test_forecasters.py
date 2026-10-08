@@ -6,6 +6,7 @@ import pytest
 from rvol.domain import Forecaster
 from rvol.models import (
     AR1Forecaster,
+    EWMAForecaster,
     HARForecaster,
     HistoricalMeanForecaster,
     NaiveForecaster,
@@ -21,12 +22,19 @@ def test_all_forecasters_implement_the_common_contract():
     models: list[Forecaster] = [
         HistoricalMeanForecaster(),
         NaiveForecaster(),
+        EWMAForecaster(),
         AR1Forecaster(),
         HARForecaster(),
     ]
 
     assert all(isinstance(model, Forecaster) for model in models)
-    assert [model.name for model in models] == ["historical_mean", "naive", "AR1", "HAR"]
+    assert [model.name for model in models] == [
+        "historical_mean",
+        "naive",
+        "EWMA",
+        "AR1",
+        "HAR",
+    ]
 
 
 def test_historical_mean_predicts_the_training_target_mean():
@@ -47,6 +55,22 @@ def test_naive_forecaster_returns_the_current_daily_feature():
 
     np.testing.assert_array_equal(predicted, future[:, 0])
     assert not np.shares_memory(predicted, future)
+
+
+def test_ewma_forecaster_applies_fixed_decay_on_the_variance_scale():
+    target = np.log(np.array([1.0, 4.0, 9.0]))
+    fitted = EWMAForecaster(decay=0.5).fit(np.empty((3, 0)), target)
+
+    predicted = fitted.predict(np.empty((2, 0)))
+
+    expected_variance = 0.5 * (0.5 * 1.0 + 0.5 * 4.0) + 0.5 * 9.0
+    np.testing.assert_allclose(predicted, np.log([expected_variance, expected_variance]))
+
+
+@pytest.mark.parametrize("decay", [0.0, 1.0, -0.1, float("nan")])
+def test_ewma_forecaster_rejects_invalid_decay(decay):
+    with pytest.raises(ValueError, match="decay"):
+        EWMAForecaster(decay=decay)
 
 
 def test_ar1_recovers_known_coefficients():

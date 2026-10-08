@@ -16,19 +16,21 @@ from rvol.evaluation import EvaluationResult
 MODEL_STYLES: dict[str, dict[str, object]] = {
     "historical_mean": {"color": "0.55", "linestyle": ":"},
     "naive": {"color": "tab:orange", "linestyle": "--"},
+    "EWMA": {"color": "tab:purple", "linestyle": (0, (3, 1, 1, 1))},
     "AR1": {"color": "tab:blue", "linestyle": "-."},
     "HAR": {"color": "tab:green", "linestyle": "-"},
 }
 MODEL_LABELS = {
     "historical_mean": "Historical mean",
     "naive": "Naïve",
+    "EWMA": "EWMA",
     "AR1": "AR(1)",
     "HAR": "HAR-RV",
 }
 
 
 def _model_order(models: set[str]) -> list[str]:
-    preferred = ("historical_mean", "naive", "AR1", "HAR")
+    preferred = ("historical_mean", "naive", "EWMA", "AR1", "HAR")
     return [model for model in preferred if model in models] + sorted(models.difference(preferred))
 
 

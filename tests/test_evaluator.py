@@ -10,6 +10,7 @@ from rvol.domain import ExperimentConfig, ExperimentResult
 from rvol.evaluation import ForecastEvaluator, ModelLossSummary
 from rvol.models import (
     AR1Forecaster,
+    EWMAForecaster,
     HARForecaster,
     HistoricalMeanForecaster,
     NaiveForecaster,
@@ -40,6 +41,7 @@ def experiment_result(
         models=(
             HistoricalMeanForecaster(),
             NaiveForecaster(),
+            EWMAForecaster(),
             AR1Forecaster(),
             HARForecaster(),
         ),
@@ -55,14 +57,14 @@ def experiment_result(
 def test_evaluator_calculates_both_metrics_for_every_model():
     evaluation = ForecastEvaluator(hac_lags=3).evaluate(experiment_result())
 
-    assert len(evaluation.losses) == 240
-    assert len(evaluation.summaries) == 8
+    assert len(evaluation.losses) == 300
+    assert len(evaluation.summaries) == 10
     assert {
         (summary.model, summary.metric, summary.n_obs)
         for summary in evaluation.summaries
     } == {
         (model, metric, 30)
-        for model in ("AR1", "HAR", "historical_mean", "naive")
+        for model in ("AR1", "EWMA", "HAR", "historical_mean", "naive")
         for metric in ("QLIKE", "log-RV MSE")
     }
     assert len(evaluation.comparisons) == 2
