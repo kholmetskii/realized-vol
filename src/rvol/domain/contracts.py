@@ -53,6 +53,11 @@ class UpdatablePredictor(FittedForecaster, Protocol):
 class TrainingWindowPolicy(Protocol):
     """Select a contiguous window from chronological, already eligible rows."""
 
+    @property
+    def max_size(self) -> int | None:
+        """Maximum training count, or None for an unbounded window."""
+        ...
+
     def select(self, n_available: int) -> slice:
         """Return a slice within [0, n_available), without selecting future rows."""
         ...

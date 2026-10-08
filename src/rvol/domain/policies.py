@@ -16,6 +16,10 @@ def _require_integer(value: int, name: str, minimum: int) -> None:
 class ExpandingWindow:
     """Select all eligible training observations available at the origin."""
 
+    @property
+    def max_size(self) -> None:
+        return None
+
     def select(self, n_available: int) -> slice:
         _require_integer(n_available, "n_available", 0)
         return slice(0, n_available)
@@ -33,6 +37,10 @@ class RollingWindow:
 
     def __post_init__(self) -> None:
         _require_integer(self.size, "size", 1)
+
+    @property
+    def max_size(self) -> int:
+        return self.size
 
     def select(self, n_available: int) -> slice:
         _require_integer(n_available, "n_available", 0)

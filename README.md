@@ -126,14 +126,18 @@ settings; reporting depends on these domain values rather than importing
 concrete models or duplicating their defaults. Direct `ForecastArtifactWriter`
 calls now require this snapshot as the `specification` keyword argument.
 
-Execution policies can be composed independently of the runner:
+Execution policies select the strategy used by a walk-forward run:
 
-    from rvol.domain import EveryNSessions, RollingWindow, WalkForwardStrategy
+    from rvol.composition import standard_experiment_definition
+    from rvol.domain import EveryNSessions, ExperimentConfig, RollingWindow, WalkForwardStrategy
 
     strategy = WalkForwardStrategy(
         training_window=RollingWindow(size=504),
         retrain=EveryNSessions(5),
     )
+    config = ExperimentConfig(min_train_size=252, strategy=strategy)
+    definition = standard_experiment_definition()
+    experiment = definition.run(daily, config)
 
 `TrainingWindowPolicy.select(n_available)` returns a slice of chronological,
 already eligible training rows. `ExpandingWindow` selects all of them;
@@ -155,9 +159,26 @@ variance-scale recursion used by `fit`; other fitted models retain the common
 `predict` interface. Fitting EWMA again initializes its state from the supplied
 training window.
 
-Connecting these policies and observation updates to `ExperimentConfig` and
-`WalkForwardExperiment` is the next implementation step. The current runner
-continues to use expanding history and refit every model at every origin.
+The runner starts once the selected window meets `min_train_size`, growing a
+rolling window up to its configured size. Set the minimum equal to the window
+size to require a full window from the first fit. A bounded window must be at
+least the minimum training size. Without a strategy override, runs retain
+expanding history and daily refitting.
+
+Between refits, HAR and AR1 reuse their fitted coefficients with fresh features,
+and HAR retains its fitted smearing correction. EWMA consumes only newly
+available targets, once each; a refit rebuilds its state from the selected
+window. Both fitting and updates use outcomes with `target_date <= origin_date`.
+Reporting bounds preserve the global schedule: the runner initializes from
+the last scheduled fit before the requested range and applies subsequent
+updates before reporting its first forecast. All fitted state belongs to one
+run. Origin dates must advance strictly in chronological order.
+
+Forecast records carry `fit_date`, `train_start_date`, and `train_end_date`.
+Training boundaries refer to target dates in the last fit, and `n_train` is
+the count used by that fit, including when the model is reused or updated.
+`ExperimentResult` also retains the run configuration and the first eligible
+origin as `strategy_anchor`. CLI strategy options are the next integration step.
 
 ## Reproduce the plots
 
