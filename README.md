@@ -14,7 +14,7 @@ with error?
 ## Architecture
 
     src/rvol/domain/       immutable configuration, results, and protocols
-    src/rvol/application/  model-agnostic walk-forward use cases
+    src/rvol/application/  forecast data alignment and execution use cases
     src/rvol/cli/          packaged command-line entry points
     src/rvol/composition/  experiment components and comparison defaults
     src/rvol/models/       interchangeable volatility forecasting models
@@ -25,6 +25,7 @@ with error?
     src/rvol/market/       FX sessions and timestamp sampling rules
     src/rvol/estimators/   pure numerical variance estimators
     src/rvol/features/     daily features built from market data and estimators
+    src/rvol/targets/      future outcomes built from observed daily series
     src/rvol/diagnostics/  volatility signatures and microstructure tests
     src/rvol/plotting/     static research figures
     src/rvol/simulation/   latent prices, observation noise, Monte Carlo checks
@@ -39,6 +40,7 @@ The forecasting dependency direction points toward stable contracts:
        ├── composition ─┬──> application ──> domain
        │               ├──> models ────────> domain
        │               ├──> features ──────> domain
+       │               ├──> targets ───────> domain
        │               └──> evaluation ──> domain
        ├── evaluation ────────────────> domain
        ├── reporting ──> evaluation + domain
@@ -89,9 +91,9 @@ Fitted coefficients are available as `fitted.intercept` and
 
 The standard commands share an `ExperimentDefinition` from
 `rvol.composition.standard_experiment_definition`. It selects the feature
-builder, models, executor factory, metrics, evaluation comparison pairs, plot
-candidate, and robustness baselines together. Construct a different definition
-to use other features, models, execution methods, metrics, or comparison choices:
+builder, target builder, models, executor factory, metrics, evaluation
+comparison pairs, plot candidate, and robustness baselines together. Construct a different definition
+to use other features, targets, models, execution methods, metrics, or comparison choices:
 
     from rvol.composition import standard_experiment_definition
     from rvol.domain import ExperimentConfig, WalkForwardSettings
@@ -104,7 +106,7 @@ to use other features, models, execution methods, metrics, or comparison choices
 `ExperimentExecutor[Dataset]` is the execution contract: `run(features)` returns
 an `ExperimentResult`. `ExperimentDefinition` receives an `executor_factory`
 that accepts `(models, config)` and creates a fresh executor for each call to
-`definition.run`. The definition prepares features and delegates execution;
+`definition.run`. The definition aligns features with targets and delegates execution;
 the executor owns fitting, observation availability and forecasting. Executors
 preserve the prepared input and keep fitted state local to each run.
 
@@ -118,8 +120,8 @@ constructed `ExperimentDefinition` objects also require an `executor_factory`.
 Executors return the common forecast records so evaluation and plotting can be
 reused; artifact export additionally requires the run configuration, execution
 snapshot and fit boundaries described below. Executors can use independent
-settings types. Schemes requiring fold identifiers need corresponding result
-extensions.
+settings types and retain run/fold identities and target definitions in the
+common results.
 
 `ExperimentConfig[Settings]` contains shared reporting dates and a required
 `execution` settings object. `ExperimentDefinition[Settings]` binds its executor
@@ -130,6 +132,45 @@ for repeated calls to `run.run(daily)`. The commands use this same object when
 selecting an executor.
 `holdout_experiment_definition()` assembles the standard models and features
 with holdout execution; composition owns concrete executor selection.
+
+The target is selected separately from execution settings:
+
+    from rvol.domain import TargetHorizon
+
+    definition = standard_experiment_definition(
+        target_horizon=TargetHorizon(sessions=5, kind="cumulative"),
+    )
+    experiment = definition.run(daily, config)
+
+For a forecast made after session `t`, the two target kinds mean:
+
+| Target | Variance being forecast | Log target used in fitting |
+|---|---|---|
+| `TargetHorizon(h, "session")` | `RV[t+h]` | `log(RV[t+h])` |
+| `TargetHorizon(h, "cumulative")` | `RV[t+1] + ... + RV[t+h]` | `log(RV[t+1] + ... + RV[t+h])` |
+
+The default is the existing next-session target, `TargetHorizon(1, "session")`.
+Horizons count observed sessions, including across weekends and holidays.
+Cumulative targets sum variance, rather than averaging it or adding log values.
+Their features still contain only information available at the origin. Training
+and observation updates wait until the **final** target session is known;
+partially observed intervals cannot enter either operation. Trailing rows
+without a complete target are excluded. Reporting bounds refer to that final
+session, rather than the origin or interval start.
+
+Historical mean, EWMA, AR1 and HAR fit the selected target directly. The standard
+naive benchmark uses today's variance for a future-session target, and
+`h × today's variance` for a cumulative target; its `variance_multiplier` is
+recorded in the model specification. HAR's smearing correction uses residuals
+of the selected log target. Models retain their common fit/predict interfaces.
+
+Prepared DataFrames carry `horizon_sessions`, `target_kind`, and
+`target_start_date`. For a session target the start and end are the same;
+for a cumulative target the start is the next observed session. Legacy inputs
+without horizon columns retain the one-session interpretation. Custom builders
+must supply consistent target metadata, including the `target_horizon` DataFrame
+attribute for empty frames. Results preserve the target even when no forecasts
+can be produced.
 
 Evaluation keeps the default naive-versus-HAR comparison and accepts ordered
 `--compare` overrides. Plots compare all other models with the configured
@@ -152,6 +193,12 @@ lower expected loss; each test validates its own sample requirements.
 one-sided DM calculation and records the resolved Newey–West lag count in each
 outcome. Generic results expose `test_name`, `statistic`, `p_value`, and immutable
 `test_parameters`, alongside the model names and mean losses.
+For horizon `h`, standard composition and the direct evaluator's default test
+use at least `h - 1` HAC lags, alongside the existing sample-size rule, to account
+for overlapping multi-session errors. An explicit `hac_lags` overrides that
+minimum; the resolved count is always recorded. Comparisons require at least
+three observations and at least two more observations than the lag count.
+Injected tests retain their own settings and sample requirements.
 
     from dataclasses import replace
     from rvol.evaluation import DieboldMarianoTest
@@ -189,7 +236,7 @@ attributes have been removed.
 The robustness command accepts repeated `--check` options (`hac_sensitivity`,
 `win_rates`, `monthly_losses`, `largest_errors`). Omitting them retains all four
 checks. For example, add `--check monthly_losses --check largest_errors` to
-generate only those tables and report sections. `robustness.json` schema 2
+generate only those tables and report sections. `robustness.json` schema 3
 records the selected checks, their settings, and nested comparison-test
 specifications. The sensitivity CSV uses the generic `statistic` column.
 
@@ -223,26 +270,55 @@ The default `aggregation="equal_run"` averages per-run mean losses, giving each
 identified run/fold equal weight. `aggregation="pooled"` weights those means by
 their forecast counts. Overlapping dates remain separate forecast cases in
 both modes; `n_forecasts` counts those cases, not independent observations.
-Runs must contain identical model and metric sets. Statistical tests are
+Runs must contain identical model sets, metric sets and target horizons. Statistical tests are
 reported within each run/fold; p-values are not pooled across folds.
 
 Validation artifacts retain run/fold IDs in per-date losses, per-run summaries
-and comparisons, alongside aggregate loss summaries. `validation.json` schema 1
-records identities and aggregation rules. Single-run forecast artifacts use
-schema 6 and append `run_id`/`fold_id` to their CSVs. Robustness metadata uses
-schema 2 and adds the same identity columns to diagnostic CSVs. Evaluation and
-plotting reject mismatched run identities.
+and comparisons, alongside aggregate loss summaries. `validation.json` schema 2
+records identities, targets and aggregation rules. Single-run forecast artifacts
+use schema 8; robustness metadata uses schema 3. All CSVs carry `run_id`/`fold_id`
+where applicable, plus `horizon_sessions`/`target_kind`. Forecasts and per-date
+validation losses also retain the forecast origin and target interval start.
+Evaluation and plotting reject mismatched run identities or target definitions.
 
-Models and feature builders expose an immutable `ComponentSpecification` with
-an implementation identifier, ordered feature names and scalar settings.
-`Forecaster.specification` is part of the model contract;
-`FeatureBuilder[pd.DataFrame]` describes a callable with the same property.
-`HARFeatureBuilder` binds its column names, rolling windows and gap policy to
-both feature preparation and metadata. The `build_har_features` function
-remains available with the same defaults and arguments.
+Models, feature builders and target builders expose an immutable
+`ComponentSpecification` with an implementation identifier, ordered feature
+names and scalar settings. `FeatureBuilder[pd.DataFrame]` and
+`TargetBuilder[pd.DataFrame]` are separate callable contracts. A feature builder
+returns `origin_date` and past-only inputs, without target columns. A target
+builder supplies its `horizon` and labels for the full observed session timeline,
+independently of feature warm-up windows or missing feature rows.
 
-Use `definition.specification` to snapshot the selected feature builder and
-models before running an experiment. Custom components describe their own
+`HARFeatureBuilder` and `build_har_features` now return only HAR inputs, including
+the latest observed session. They no longer accept a `horizon` argument or
+produce future labels. `RealizedVarianceTargetBuilder` owns the target horizon,
+source columns, interval dates and log-variance labels. It retains incomplete
+trailing outcomes with missing labels and end dates. `target_date` is the final
+session of the interval and determines when the outcome becomes available.
+
+`definition.prepare(daily)` builds both tables and joins them by `origin_date`.
+It validates unique origins, matching target metadata and valid intervals, and
+omits incomplete future outcomes before execution. A feature builder can omit
+warm-up or unavailable rows without changing which sessions each target covers.
+For direct executor calls, assemble inputs explicitly:
+
+    from rvol.application import prepare_forecast_data
+    from rvol.features.forecasting import HARFeatureBuilder
+    from rvol.targets import RealizedVarianceTargetBuilder
+
+    features = HARFeatureBuilder()(daily)
+    targets = RealizedVarianceTargetBuilder(TargetHorizon(5, "cumulative"))(daily)
+    prepared = prepare_forecast_data(features, targets)
+    experiment = executor.run(prepared)
+
+Custom feature and target builders can be injected independently through
+`ExperimentDefinition(feature_builder=..., target_builder=..., ...)`; both use
+the same alignment and executor availability rules. Use the standard definition
+factory's `target_horizon` argument  to also derive
+the standard naive multiplier and minimum comparison-test lag.
+
+Use `definition.specification` to snapshot the selected feature builder,
+target builder and models before running an experiment. Custom components describe their own
 settings; reporting depends on these domain values rather than importing
 concrete models or duplicating their defaults. Direct `ForecastArtifactWriter`
 calls now require this snapshot as the `specification` keyword argument.
@@ -347,12 +423,29 @@ including their installed `rvol-*` equivalents:
 | Option | Meaning | Default |
 |---|---|---|
 | `--executor walk-forward` or `holdout` | Execution method | `walk-forward` |
+| `--horizon N` | Target horizon in observed sessions | `1` |
+| `--target-kind session` or `cumulative` | Future-session variance or summed future variance | `session` |
 | `--min-train-size N` | Minimum training observations | Selected executor's default (`252` for both) |
 | `--training-window expanding` or `rolling` | History selected at each fit | `expanding` |
 | `--window-size N` | Maximum training observations for a rolling window | Required for `rolling` |
 | `--retrain-every N` | Refit every N eligible forecast sessions | `1` |
 | `--train-end YYYY-MM-DD` | Holdout training cutoff | Required for `holdout` |
 | `--update-observations` | Update stateful holdout predictors with available outcomes | Disabled |
+
+For example, forecast summed variance over the next five observed sessions:
+
+    python scripts/evaluate_forecasts.py \
+        data/derived/EURUSD_daily_rv_5min.parquet \
+        --min-train-size 252 \
+        --horizon 5 \
+        --target-kind cumulative \
+        --forecast-start 2025-01-01 \
+        --forecast-end 2026-09-30 \
+        --output-dir outputs/five_session_cumulative
+
+The same target options apply to `forecast_plots.py`, `robustness_report.py`
+and their installed command equivalents. Sensitivity diagnostics still run
+their explicitly selected lag grid, which may include lags below `h - 1`.
 
 For example, use up to 504 training observations and refit every fifth eligible
 session with:
@@ -441,9 +534,11 @@ construction rejects such gaps by default so disconnected periods cannot be
 treated as consecutive trading sessions.
 
 `rvol.features.forecasting.build_har_features` converts that daily table into
-one-session-ahead HAR-RV rows. Each row records its forecast origin and target
-dates explicitly, using the current session, latest five sessions, and latest
-22 sessions as predictors of the following session's log realised variance.
+past-only HAR-RV inputs: the current session's log variance, the latest five
+sessions' mean log variance, and the latest 22 sessions' mean log variance.
+`rvol.targets.RealizedVarianceTargetBuilder` independently creates future
+log-variance labels and their interval dates. The standard experiment combines
+these by forecast origin and defaults to predicting the next observed session.
 
 `rvol.application.WalkForwardExperiment` runs historical-mean, naïve,
 fixed-decay EWMA, AR(1), and HAR-RV forecasters over identical expanding windows.
@@ -452,7 +547,7 @@ evaluated in log space for numerical stability. Training outcomes are admitted
 only after their target dates have become observable, preventing future
 information from leaking into a forecast.
 
-`HAR` fits next-session log variance by OLS and applies Duan's residual
+`HAR` fits the selected log variance target by OLS and applies Duan's residual
 correction to target mean variance:
 
     residual_i = actual_log_rv_i - fitted_log_rv_i
@@ -472,7 +567,7 @@ The common output scale does not imply a common statistical target:
 | Model | Meaning of the forecast after exponentiating its log output |
 |---|---|
 | Historical mean | Geometric mean of training realised variances |
-| Naïve | Current session's realised variance |
+| Naïve | Current session's realised variance; multiplied by the horizon for cumulative targets |
 | EWMA | Exponentially weighted average of past realised variances |
 | AR(1) | Geometric-mean variance forecast from the log regression |
 | HAR | Mean-variance estimate using the training-residual correction |
@@ -499,8 +594,8 @@ difference favours the candidate.
 When `--output-dir` is provided, the same run also writes normalized forecasts,
 mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
 records dataset coverage and a SHA-256 fingerprint so the exact input can be
-verified later. JSON schema version 6 records a `specification` object
-containing the feature builder and each model's implementation, ordered feature
+verified later. JSON schema version 8 records a `specification` object
+containing the feature and target builders and each model's implementation, ordered feature
 names and settings, including EWMA decay and HAR's training-residual smearing
 correction. HAR windows count observed sessions; `max_gap_days` is a calendar-day
 gap limit. These are configured settings, rather than fitted coefficients.
@@ -510,8 +605,11 @@ full dataset's schedule anchor and the observation-update rule.
 `forecasts.csv` appends `fit_date`, `train_start_date`, and
 `train_end_date`; its existing columns retain their order. The training count
 and boundaries describe the last actual fit, even when a predictor has since
-consumed new observations. Loss and comparison CSV layouts are unchanged.
-Readers that check `schema_version` must accept version 6. Execution metadata
+consumed new observations. Forecasts also append `target_start_date`,
+`horizon_sessions` and `target_kind`; loss summaries and comparisons append the
+two target-definition columns. JSON's top-level `target` object describes the
+horizon; `specification.target` identifies the builder and label source.
+Readers that check `schema_version` must accept version 8. Execution metadata
 now contains `executor`, `settings`, named `policies`, and runtime `facts`.
 `min_train_size` belongs to execution settings, rather than shared experiment
 bounds. Repeating an unchanged run produces byte-identical artifacts.

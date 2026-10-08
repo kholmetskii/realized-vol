@@ -13,17 +13,17 @@ def daily_sample(n_sessions: int = 35) -> pd.DataFrame:
     })
 
 
-def test_har_features_have_exact_one_session_ahead_alignment():
+def test_har_features_include_current_inputs_and_the_latest_observed_origin():
     daily = daily_sample()
 
     features = build_har_features(daily)
 
     first_origin = 21
     assert features.loc[0, "origin_date"] == daily.loc[first_origin, "date"]
-    assert features.loc[0, "target_date"] == daily.loc[first_origin + 1, "date"]
     assert features.loc[0, "rv_daily"] == daily.loc[first_origin, "log_rv"]
-    assert features.loc[0, "target"] == daily.loc[first_origin + 1, "log_rv"]
-    assert len(features) == len(daily) - 22
+    assert len(features) == len(daily) - 21
+    assert features.iloc[-1]["origin_date"] == daily.iloc[-1]["date"]
+    assert list(features.columns) == ["origin_date", "rv_daily", "rv_weekly", "rv_monthly"]
 
 
 def test_har_rolling_features_use_only_information_at_the_origin():
@@ -46,7 +46,7 @@ def test_changing_a_future_value_cannot_change_earlier_features():
     before = build_har_features(original)
     after = build_har_features(changed)
     earlier = before["origin_date"] < original.loc[changed_at, "date"]
-    columns = ["origin_date", "target_date", "rv_daily", "rv_weekly", "rv_monthly"]
+    columns = ["origin_date", "rv_daily", "rv_weekly", "rv_monthly"]
 
     pd.testing.assert_frame_equal(
         before.loc[earlier, columns].reset_index(drop=True),
@@ -96,9 +96,7 @@ def test_configured_builder_uses_the_windows_and_columns_it_describes():
         "date_col": "session", "rv_col": "value", "weekly_window": 2,
         "monthly_window": 4, "max_gap_days": None,
     }
-    assert len(features) == 4
+    assert len(features) == 5
     assert features.loc[0, "origin_date"] == daily.loc[3, "session"]
-    assert features.loc[0, "target_date"] == daily.loc[4, "session"]
-    assert features.loc[0, "target"] == daily.loc[4, "value"]
     assert features.loc[0, "rv_weekly"] == pytest.approx(daily.loc[2:3, "value"].mean())
     assert features.loc[0, "rv_monthly"] == pytest.approx(daily.loc[:3, "value"].mean())

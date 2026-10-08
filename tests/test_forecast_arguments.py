@@ -59,6 +59,20 @@ def test_run_and_fold_identities_are_configurable_in_shared_arguments():
     )
 
 
+@pytest.mark.parametrize("kind, multiplier", [("session", 1.0), ("cumulative", 5.0)])
+def test_target_arguments_configure_targets_and_persistence_benchmark(kind, multiplier):
+    parser = argparse.ArgumentParser()
+    add_forecast_arguments(parser)
+    run = experiment_run_from_args(parser, parser.parse_args([
+        "--horizon", "5", "--target-kind", kind,
+    ]))
+    parameters = dict(run.definition.target_builder.specification.parameters)
+    assert parameters["horizon_sessions"] == 5
+    assert parameters["target_kind"] == kind
+    naive = next(model for model in run.definition.models if model.name == "naive")
+    assert dict(naive.specification.parameters)["variance_multiplier"] == multiplier
+
+
 def test_expanding_history_can_refit_less_frequently():
     config = parse_config(["--min-train-size", "20", "--retrain-every", "5"])
 
@@ -80,7 +94,9 @@ def test_rolling_arguments_build_the_requested_strategy_and_date_bounds():
     )
 
 
-@pytest.mark.parametrize("option", ["--min-train-size", "--window-size", "--retrain-every"])
+@pytest.mark.parametrize(
+    "option", ["--min-train-size", "--window-size", "--retrain-every", "--horizon"],
+)
 @pytest.mark.parametrize("value", ["0", "-1", "1.5", "abc"])
 def test_observation_counts_and_refit_intervals_require_positive_integers(option, value, capsys):
     with pytest.raises(SystemExit) as error:

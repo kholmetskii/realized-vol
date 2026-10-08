@@ -60,5 +60,7 @@ def main() -> None:
     figure.savefig(output, dpi=160, bbox_inches="tight")
     plt.close(figure)
     print(f"targets: {len(target_dates)}")
+    horizon = experiment.target_horizon
+    print(f"target:  {horizon.kind}, horizon {horizon.sessions} observed sessions")
     print(f"metric:  {args.metric}")
     print(f"figure:  {output}")

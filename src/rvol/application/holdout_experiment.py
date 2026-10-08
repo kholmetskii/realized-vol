@@ -8,7 +8,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
-from rvol.application._forecast_data import validated_features, validated_models
+from rvol.application._forecast_data import target_horizon, validated_features, validated_models
 from rvol.domain import (
     ExecutionMetadata,
     ExperimentConfig,
@@ -38,6 +38,7 @@ class HoldoutExperiment:
 
     def run(self, features: pd.DataFrame) -> ExperimentResult:
         frame = validated_features(features, self.models)
+        horizon = target_horizon(frame)
         settings = self.config.execution
         execution = ExecutionMetadata(
             executor=f"{type(self).__module__}.{type(self).__qualname__}",
@@ -68,6 +69,7 @@ class HoldoutExperiment:
         if not positions:
             return ExperimentResult(
                 config=self.config, execution=execution, identity=self.config.identity,
+                target_horizon=horizon,
             )
 
         training = frame.iloc[:n_train]
@@ -106,6 +108,10 @@ class HoldoutExperiment:
                 records.append(ForecastRecord(
                     model=model.name, origin_date=origin.date(),
                     target_date=targets[position].date(),
+                    target_start_date=cast(
+                        pd.Timestamp, frame["target_start_date"].iloc[position],
+                    ).date(),
+                    target_horizon=horizon,
                     n_train=n_train, actual_log_rv=float(frame["target"].iloc[position]),
                     predicted_log_rv=float(prediction[0]), fit_date=settings.train_end,
                     train_start_date=train_start, train_end_date=train_end,
@@ -113,4 +119,5 @@ class HoldoutExperiment:
         return ExperimentResult(
             records=tuple(records), config=self.config, execution=execution,
             identity=self.config.identity,
+            target_horizon=horizon,
         )

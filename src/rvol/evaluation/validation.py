@@ -49,6 +49,8 @@ def evaluate_runs(
     identities = [experiment.identity for experiment in experiments]
     if not identities or len(set(identities)) != len(identities):
         raise ValueError("validation runs must be non-empty and have unique run/fold identities")
+    if len({experiment.target_horizon for experiment in experiments}) != 1:
+        raise ValueError("validation runs must use identical target horizons")
     ordered = sorted(experiments, key=lambda item: (
         item.identity.run_id, item.identity.fold_id or "",
     ))

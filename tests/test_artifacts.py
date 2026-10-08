@@ -21,6 +21,7 @@ from rvol.evaluation import ForecastEvaluator
 from rvol.features.forecasting import HARFeatureBuilder
 from rvol.models import EWMAForecaster, HARForecaster
 from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
+from rvol.targets import RealizedVarianceTargetBuilder
 
 
 @pytest.fixture
@@ -40,6 +41,7 @@ def configured_run(tmp_path):
             date_col="session", rv_col="value", weekly_window=2,
             monthly_window=4, max_gap_days=None,
         ),
+        target_builder=RealizedVarianceTargetBuilder(date_col="session", rv_col="value"),
         comparison_pairs=(("EWMA", "HAR"),),
         baseline_models=("EWMA",),
     )
@@ -64,7 +66,7 @@ def test_artifacts_record_nondefault_settings_and_remain_deterministic(tmp_path,
     first = {path.name: path.read_bytes() for path in paths.all()}
     metadata = json.loads(paths.experiment.read_text())
 
-    assert metadata["schema_version"] == 6
+    assert metadata["schema_version"] == 8
     assert experiment.execution is not None
     assert metadata["execution"] == {
         "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",
@@ -104,6 +106,10 @@ def test_artifacts_record_nondefault_settings_and_remain_deterministic(tmp_path,
     assert metadata["specification"]["features"]["parameters"] == {
         "date_col": "session", "rv_col": "value", "weekly_window": 2,
         "monthly_window": 4, "max_gap_days": None,
+    }
+    assert metadata["specification"]["target"]["parameters"] == {
+        "date_col": "session", "rv_col": "value",
+        "horizon_sessions": 1, "target_kind": "session",
     }
     models = metadata["specification"]["models"]
     assert [model["name"] for model in models] == ["EWMA", "HAR"]

@@ -49,6 +49,8 @@ def main() -> None:
 
     target_dates = {record.target_date for record in experiment.records}
     print(f"targets:          {len(target_dates)}")
+    horizon = experiment.target_horizon
+    print(f"target:           {horizon.kind}, horizon {horizon.sessions} observed sessions")
     for check in robustness.checks:
         print(f"{check.name}: {len(check.rows)} rows")
     print("artifacts:")

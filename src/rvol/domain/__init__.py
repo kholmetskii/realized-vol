@@ -13,6 +13,7 @@ from rvol.domain.contracts import (
     Forecaster,
     ForecastMetric,
     RefitSchedule,
+    TargetBuilder,
     TrainingWindowPolicy,
     UpdatablePredictor,
 )
@@ -30,6 +31,7 @@ from rvol.domain.specifications import (
     ExecutionSpecification,
     ExperimentSpecification,
 )
+from rvol.domain.targets import TargetHorizon
 
 __all__ = [
     "ComponentSpecification",
@@ -56,6 +58,8 @@ __all__ = [
     "RollingWindow",
     "RunIdentity",
     "TrainingWindowPolicy",
+    "TargetHorizon",
+    "TargetBuilder",
     "UpdatablePredictor",
     "WalkForwardSettings",
 ]

@@ -41,10 +41,11 @@ class ComponentSpecification:
 
 @dataclass(frozen=True)
 class ExperimentSpecification:
-    """Feature preparation and model settings selected for one experiment."""
+    """Independent feature, target and model settings for one experiment."""
 
     features: ComponentSpecification
     models: tuple[ComponentSpecification, ...]
+    target: ComponentSpecification
 
     def __post_init__(self) -> None:
         names = [model.name for model in self.models]

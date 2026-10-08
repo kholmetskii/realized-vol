@@ -33,6 +33,10 @@ class ValidationArtifactWriter:
         identities = [run.identity for run in validation.runs]
         if not identities or len(set(identities)) != len(identities):
             raise ValueError("validation results must have unique, non-empty run/fold identities")
+        if len({run.target_horizon for run in validation.runs}) != 1:
+            raise ValueError("validation results must use identical target horizons")
+        horizon = validation.runs[0].target_horizon
+        target_fields = {"horizon_sessions": horizon.sessions, "target_kind": horizon.kind}
         self.output_dir.mkdir(parents=True, exist_ok=True)
         paths = ValidationArtifactPaths(
             self.output_dir / "losses.csv", self.output_dir / "run_loss_summary.csv",
@@ -40,13 +44,15 @@ class ValidationArtifactWriter:
             self.output_dir / "validation.json",
         )
         losses = [
-            asdict(item) | asdict(run.identity) for run in validation.runs for item in run.losses
+            asdict(item) | asdict(run.identity) | target_fields
+            for run in validation.runs for item in run.losses
         ]
         summaries = [
-            asdict(item) | asdict(run.identity) for run in validation.runs for item in run.summaries
+            asdict(item) | asdict(run.identity) | target_fields
+            for run in validation.runs for item in run.summaries
         ]
         comparisons = [
-            asdict(item) | asdict(run.identity) | {
+            asdict(item) | asdict(run.identity) | target_fields | {
                 "test_parameters": json.dumps(dict(item.test_parameters), sort_keys=True),
             }
             for run in validation.runs for item in run.comparisons
@@ -57,13 +63,15 @@ class ValidationArtifactWriter:
             "metric", "baseline_model", "candidate_model", "n_obs", "baseline_mean_loss",
             "candidate_mean_loss", "mean_loss_difference", "test_name", "statistic", "p_value",
             "test_parameters", "run_id", "fold_id",
+            "horizon_sessions", "target_kind",
         ]), paths.run_comparisons)
         atomic_csv(
-            pd.DataFrame([asdict(item) for item in validation.summaries]),
+            pd.DataFrame([asdict(item) | target_fields for item in validation.summaries]),
             paths.aggregate_summaries,
         )
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
+            "target": asdict(horizon),
             "aggregation": validation.aggregation,
             "overlap_policy": "keep_separate_run_fold_forecasts",
             "statistical_tests": "within_each_run_fold_only",

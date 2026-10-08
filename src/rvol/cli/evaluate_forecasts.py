@@ -42,6 +42,8 @@ def main() -> None:
     target_dates = sorted({record.target_date for record in experiment_result.records})
 
     print(f"targets: {len(target_dates)}")
+    horizon = experiment_result.target_horizon
+    print(f"target:  {horizon.kind}, horizon {horizon.sessions} observed sessions")
     print(f"period:  {target_dates[0]} .. {target_dates[-1]}\n")
     print(f"{'metric':<12} {'model':<18} {'n':>6} {'mean loss':>14}")
     for summary in evaluation.summaries:

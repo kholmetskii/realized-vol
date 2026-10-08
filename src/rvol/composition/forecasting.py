@@ -8,7 +8,7 @@ from typing import Generic, TypeVar, overload
 
 import pandas as pd
 
-from rvol.application import HoldoutExperiment, WalkForwardExperiment
+from rvol.application import HoldoutExperiment, WalkForwardExperiment, prepare_forecast_data
 from rvol.domain import (
     ExperimentConfig,
     ExperimentExecutorFactory,
@@ -17,6 +17,8 @@ from rvol.domain import (
     FeatureBuilder,
     Forecaster,
     HoldoutSettings,
+    TargetBuilder,
+    TargetHorizon,
     WalkForwardSettings,
 )
 from rvol.domain.contracts import ForecastComparisonTest, ForecastMetric
@@ -40,6 +42,7 @@ from rvol.models import (
     HistoricalMeanForecaster,
     NaiveForecaster,
 )
+from rvol.targets import RealizedVarianceTargetBuilder
 
 Settings = TypeVar("Settings")
 ROBUSTNESS_CHECK_NAMES = ("hac_sensitivity", "win_rates", "monthly_losses", "largest_errors")
@@ -69,6 +72,7 @@ class ExperimentDefinition(Generic[Settings]):
 
     models: tuple[Forecaster, ...]
     feature_builder: FeatureBuilder[pd.DataFrame]
+    target_builder: TargetBuilder[pd.DataFrame]
     executor_factory: ExperimentExecutorFactory[Settings, pd.DataFrame]
     metrics: tuple[ForecastMetric, ...]
     comparison_pairs: tuple[tuple[str, str], ...]
@@ -96,7 +100,10 @@ class ExperimentDefinition(Generic[Settings]):
         for model, spec in zip(configured, models, strict=True):
             if spec.name != model.name or spec.feature_names != model.feature_names:
                 raise ValueError("model specification must match its name and feature order")
-        return ExperimentSpecification(features=self.feature_builder.specification, models=models)
+        return ExperimentSpecification(
+            features=self.feature_builder.specification, models=models,
+            target=self.target_builder.specification,
+        )
 
     @property
     def all_comparison_pairs(self) -> tuple[tuple[str, str], ...]:
@@ -107,10 +114,17 @@ class ExperimentDefinition(Generic[Settings]):
             if name != self.candidate_model
         )
 
+    def prepare(self, daily: pd.DataFrame) -> pd.DataFrame:
+        """Build independent inputs and outcomes, then align by forecast origin."""
+        targets = self.target_builder(daily)
+        return prepare_forecast_data(
+            self.feature_builder(daily), targets, expected_horizon=self.target_builder.horizon,
+        )
+
     def run(self, daily: pd.DataFrame, config: ExperimentConfig[Settings]) -> ExperimentResult:
-        """Create an independent executor and delegate the prepared features."""
+        """Create an independent executor and delegate the aligned forecast data."""
         executor = self.executor_factory(self.models, config)
-        return executor.run(self.feature_builder(daily))
+        return executor.run(self.prepare(daily))
 
     def evaluator(
         self,
@@ -169,11 +183,14 @@ class ExperimentRun(Generic[Settings]):
         return self.definition.run(daily, self.config)
 
 
-def standard_forecasters() -> tuple[Forecaster, ...]:
+def standard_forecasters(*, target_horizon: TargetHorizon | None = None) -> tuple[Forecaster, ...]:
     """Return fresh instances of the models used by standard project workflows."""
+    horizon = TargetHorizon() if target_horizon is None else target_horizon
     return (
         HistoricalMeanForecaster(),
-        NaiveForecaster(),
+        NaiveForecaster(
+            variance_multiplier=float(horizon.sessions) if horizon.kind == "cumulative" else 1.0,
+        ),
         EWMAForecaster(),
         AR1Forecaster(),
         HARForecaster(),
@@ -181,40 +198,54 @@ def standard_forecasters() -> tuple[Forecaster, ...]:
 
 
 @overload
-def standard_experiment_definition() -> ExperimentDefinition[WalkForwardSettings]: ...
+def standard_experiment_definition(
+    *, target_horizon: TargetHorizon | None = None,
+) -> ExperimentDefinition[WalkForwardSettings]: ...
 
 
 @overload
 def standard_experiment_definition(
     *, executor_factory: ExperimentExecutorFactory[Settings, pd.DataFrame],
+    target_horizon: TargetHorizon | None = None,
 ) -> ExperimentDefinition[Settings]: ...
 
 
 def standard_experiment_definition(
     *, executor_factory: ExperimentExecutorFactory[Settings, pd.DataFrame] | None = None,
+    target_horizon: TargetHorizon | None = None,
 ) -> ExperimentDefinition[Settings] | ExperimentDefinition[WalkForwardSettings]:
     """Assemble fresh standard components with the selected execution method."""
     if executor_factory is None:
-        return standard_experiment_definition(executor_factory=WalkForwardExperiment)
+        return standard_experiment_definition(
+            executor_factory=WalkForwardExperiment, target_horizon=target_horizon,
+        )
+    horizon = TargetHorizon() if target_horizon is None else target_horizon
     return ExperimentDefinition(
-        models=standard_forecasters(),
+        models=standard_forecasters(target_horizon=horizon),
         feature_builder=HARFeatureBuilder(),
+        target_builder=RealizedVarianceTargetBuilder(horizon),
         executor_factory=executor_factory,
         metrics=(QLikeMetric(), LogMSEMetric()),
         comparison_pairs=(("naive", "HAR"),),
         candidate_model="HAR",
         baseline_models=("naive", "EWMA", "AR1", "historical_mean"),
+        comparison_test=DieboldMarianoTest(min_hac_lags=horizon.sessions - 1),
     )
 
 
-def holdout_experiment_definition() -> ExperimentDefinition[HoldoutSettings]:
+def holdout_experiment_definition(
+    *, target_horizon: TargetHorizon | None = None,
+) -> ExperimentDefinition[HoldoutSettings]:
     """Assemble the standard components for fixed-cutoff holdout execution."""
-    return standard_experiment_definition(executor_factory=HoldoutExperiment)
+    return standard_experiment_definition(
+        executor_factory=HoldoutExperiment, target_horizon=target_horizon,
+    )
 
 
 def run_standard_forecast_experiment(
     daily: pd.DataFrame,
     config: ExperimentConfig[WalkForwardSettings],
+    *, target_horizon: TargetHorizon | None = None,
 ) -> ExperimentResult:
     """Build HAR features and run the standard model set on common windows."""
-    return standard_experiment_definition().run(daily, config)
+    return standard_experiment_definition(target_horizon=target_horizon).run(daily, config)

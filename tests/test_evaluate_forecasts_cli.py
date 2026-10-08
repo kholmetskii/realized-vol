@@ -20,6 +20,7 @@ from rvol.domain import (
     HoldoutSettings,
     RollingWindow,
     RunIdentity,
+    TargetHorizon,
     WalkForwardSettings,
 )
 from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter, RobustnessArtifactWriter
@@ -128,11 +129,14 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
         "train_end_date",
         "run_id",
         "fold_id",
+        "target_start_date",
+        "horizon_sessions",
+        "target_kind",
     ]
     assert len(forecasts) == 30
     assert len(summaries) == 10
     assert len(comparisons) == 2 * len(expected_pairs)
-    assert metadata["schema_version"] == 6
+    assert metadata["schema_version"] == 8
     assert metadata["execution"] == {
         "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",
         "settings": {
@@ -215,7 +219,10 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
 
 
 @pytest.mark.parametrize("training_window", ["expanding", "rolling"])
-def test_forecast_cli_strategy_matches_the_python_run(tmp_path, daily_dataset, training_window):
+@pytest.mark.parametrize("sessions, kind", [(1, "session"), (3, "session"), (3, "cumulative")])
+def test_forecast_cli_strategy_matches_the_python_run(
+    tmp_path, daily_dataset, training_window, sessions, kind,
+):
     source, daily = daily_dataset
     output = tmp_path / "artifacts"
     start = cast(pd.Timestamp, daily.loc[50, "date"]).date()
@@ -226,13 +233,14 @@ def test_forecast_cli_strategy_matches_the_python_run(tmp_path, daily_dataset, t
             sys.executable, "scripts/evaluate_forecasts.py", str(source),
             "--min-train-size", "20", "--training-window", training_window, *window_args,
             "--retrain-every", "5", "--forecast-start", start.isoformat(),
+            "--horizon", str(sessions), "--target-kind", kind,
             "--forecast-end", end.isoformat(), "--output-dir", str(output),
         ],
         cwd=PROJECT_ROOT, check=False, capture_output=True, text=True,
     )
 
     assert completed.returncode == 0, completed.stderr
-    definition = standard_experiment_definition()
+    definition = standard_experiment_definition(target_horizon=TargetHorizon(sessions, kind))
     config = ExperimentConfig(execution=WalkForwardSettings(
             RollingWindow(25) if training_window == "rolling" else ExpandingWindow(),
             EveryNSessions(5), min_train_size=20), forecast_start=start, forecast_end=end)
@@ -247,7 +255,10 @@ def test_forecast_cli_strategy_matches_the_python_run(tmp_path, daily_dataset, t
     forecasts = pd.read_csv(output / "forecasts.csv")
     assert forecasts["fit_date"].nunique() == 2
     assert (forecasts["fit_date"] < forecasts["origin_date"]).any()
-    assert set(forecasts["n_train"]) == ({25} if training_window == "rolling" else {25, 30})
+    if sessions == 1:
+        assert set(forecasts["n_train"]) == ({25} if training_window == "rolling" else {25, 30})
+    else:
+        assert set(forecasts["n_train"]) == {20, 25}
 
 
 @pytest.mark.parametrize("metric", [None, "log-RV MSE"], ids=["default_metric", "log_mse"])
@@ -351,6 +362,8 @@ def test_robustness_cli_uses_shared_baselines_and_preserves_option_overrides(
 
 @pytest.mark.parametrize("module", ["evaluate_forecasts", "forecast_plots", "robustness_report"])
 @pytest.mark.parametrize("arguments, message", [
+    (["--horizon", "0"], "expected a positive integer"),
+    (["--target-kind", "unknown"], "invalid choice"),
     (["--training-window", "rolling"], "--window-size is required"),
     (["--executor", "holdout"], "--train-end is required"),
     (["--train-end", "2024-12-31"], "--train-end requires --executor holdout"),
@@ -379,12 +392,17 @@ def test_all_forecast_commands_validate_execution_options_before_loading_data(
 
 @pytest.mark.parametrize("module", ["evaluate_forecasts", "forecast_plots", "robustness_report"])
 @pytest.mark.parametrize("update", [False, True])
+@pytest.mark.parametrize(
+    "sessions, target_kind", [(1, "session"), (3, "session"), (3, "cumulative")],
+)
 def test_all_forecast_commands_use_holdout_results_from_the_python_api(
-    tmp_path, daily_dataset, monkeypatch, module, update,
+    tmp_path, daily_dataset, monkeypatch, module, update, sessions, target_kind,
 ):
     source, daily = daily_dataset
     command = import_module(f"rvol.cli.{module}")
-    definition = standard_experiment_definition(executor_factory=HoldoutExperiment)
+    definition = standard_experiment_definition(
+        executor_factory=HoldoutExperiment, target_horizon=TargetHorizon(sessions, target_kind),
+    )
     config = ExperimentConfig(
         execution=HoldoutSettings(date(2022, 3, 4), 20, update),
         identity=RunIdentity("holdout_check", "fold_1"),
@@ -395,6 +413,7 @@ def test_all_forecast_commands_use_holdout_results_from_the_python_api(
     args = [
         module, str(source), "--executor", "holdout", "--train-end", "2022-03-04",
         "--run-id", "holdout_check", "--fold-id", "fold_1",
+        "--horizon", str(sessions), "--target-kind", target_kind,
         "--min-train-size", "20", "--forecast-start", "2022-03-14",
         "--forecast-end", "2022-03-21", *(["--update-observations"] if update else []),
     ]

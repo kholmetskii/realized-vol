@@ -102,6 +102,8 @@ class ForecastArtifactWriter:
             raise ValueError("artifact configuration must match the completed experiment")
         if experiment.identity != evaluation.identity:
             raise ValueError("evaluation identity must match the completed experiment")
+        if experiment.target_horizon != evaluation.target_horizon:
+            raise ValueError("evaluation target must match the completed experiment")
         execution = experiment.execution
         if execution is None:
             raise ValueError("experiment must include execution metadata")
@@ -135,6 +137,9 @@ class ForecastArtifactWriter:
                     "train_end_date": record.train_end_date,
                     "run_id": experiment.identity.run_id,
                     "fold_id": experiment.identity.fold_id,
+                    "target_start_date": record.target_start,
+                    "horizon_sessions": experiment.target_horizon.sessions,
+                    "target_kind": experiment.target_horizon.kind,
                 }
                 for record in experiment.records
             ),
@@ -153,6 +158,9 @@ class ForecastArtifactWriter:
             ),
             key=lambda row: (row["metric"], row["baseline_model"], row["candidate_model"]),
         )
+        for row in (*summary_rows, *comparison_rows):
+            row["horizon_sessions"] = experiment.target_horizon.sessions
+            row["target_kind"] = experiment.target_horizon.kind
 
         forecast_columns = [
             "model",
@@ -168,8 +176,14 @@ class ForecastArtifactWriter:
             "train_end_date",
             "run_id",
             "fold_id",
+            "target_start_date",
+            "horizon_sessions",
+            "target_kind",
         ]
-        summary_columns = ["model", "metric", "n_obs", "mean_loss", "run_id", "fold_id"]
+        summary_columns = [
+            "model", "metric", "n_obs", "mean_loss", "run_id", "fold_id",
+            "horizon_sessions", "target_kind",
+        ]
         comparison_columns = [
             "metric",
             "baseline_model",
@@ -184,6 +198,8 @@ class ForecastArtifactWriter:
             "test_parameters",
             "run_id",
             "fold_id",
+            "horizon_sessions",
+            "target_kind",
         ]
         atomic_csv(pd.DataFrame(forecast_rows, columns=forecast_columns), paths.forecasts)
         atomic_csv(pd.DataFrame(summary_rows, columns=summary_columns), paths.loss_summary)
@@ -199,8 +215,9 @@ class ForecastArtifactWriter:
             for item in evaluation.comparisons
         ))
         payload = {
-            "schema_version": 6,
+            "schema_version": 8,
             "identity": asdict(experiment.identity),
+            "target": _component_payload(experiment.target_horizon.specification),
             "execution": {
                 "executor": execution.executor,
                 "settings": _component_payload(execution.settings.component),
@@ -212,6 +229,7 @@ class ForecastArtifactWriter:
             },
             "specification": {
                 "features": _component_payload(specification.features),
+                "target": _component_payload(specification.target),
                 "models": [
                     _component_payload(model)
                     for model in sorted(specification.models, key=lambda item: item.name)

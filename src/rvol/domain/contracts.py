@@ -14,6 +14,7 @@ from rvol.domain.specifications import ComponentSpecification, ExecutionSpecific
 if TYPE_CHECKING:
     from rvol.domain.config import ExperimentConfig
     from rvol.domain.results import ExperimentResult
+    from rvol.domain.targets import TargetHorizon
 
 FloatArray = NDArray[np.float64]
 ForecastScale = Literal["log_variance", "variance"]
@@ -183,7 +184,25 @@ class DatasetRepository(Protocol[Dataset]):
 
 @runtime_checkable
 class FeatureBuilder(Protocol[Dataset]):
-    """Prepare forecast features and describe the settings used to build them."""
+    """Build past-only inputs keyed by origin, without future outcome columns."""
+
+    @property
+    def specification(self) -> ComponentSpecification: ...
+
+    def __call__(self, daily: Dataset) -> Dataset: ...
+
+
+@runtime_checkable
+class TargetBuilder(Protocol[Dataset]):
+    """Build log-variance labels on the full observed session timeline.
+
+    DataFrame adapters return one row per origin with target, interval dates,
+    and horizon metadata. Unobserved outcomes retain missing labels and end
+    dates. A label becomes available at its interval's final session.
+    """
+
+    @property
+    def horizon(self) -> TargetHorizon: ...
 
     @property
     def specification(self) -> ComponentSpecification: ...

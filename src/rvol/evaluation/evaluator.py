@@ -14,6 +14,7 @@ from rvol.domain.contracts import ForecastComparisonTest, ForecastMetric
 from rvol.domain.identity import RunIdentity
 from rvol.domain.results import ExperimentResult, ForecastRecord
 from rvol.domain.specifications import ComponentSpecification, ParameterValue
+from rvol.domain.targets import TargetHorizon
 from rvol.evaluation.comparison import DieboldMarianoTest
 from rvol.evaluation.metrics import LogMSEMetric, QLikeMetric
 
@@ -29,6 +30,8 @@ class LossRecord:
     metric: str
     target_date: date
     loss: float
+    origin_date: date | None = None
+    target_start_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,7 @@ class EvaluationResult:
     comparisons: tuple[PairwiseComparison, ...]
     comparison_test: ComponentSpecification | None = None
     identity: RunIdentity = field(default_factory=RunIdentity)
+    target_horizon: TargetHorizon = field(default_factory=TargetHorizon)
 
 
 class ForecastEvaluator:
@@ -112,6 +116,8 @@ class ForecastEvaluator:
         self.comparison_test = (
             DieboldMarianoTest(hac_lags) if comparison_test is None else comparison_test
         )
+        self._uses_default_test = comparison_test is None
+        self._default_hac_lags = hac_lags
 
     def evaluate_runs(
         self, experiments: Sequence[ExperimentResult], *,
@@ -144,6 +150,10 @@ class ForecastEvaluator:
         for model, records in grouped.items():
             if [record.target_date for record in records] != reference_dates:
                 raise ValueError("all models must forecast identical target dates")
+            if [(r.origin_date, r.target_start) for r in records] != [
+                (r.origin_date, r.target_start) for r in reference
+            ]:
+                raise ValueError("all models must use identical forecast origins and target starts")
             actual_log = np.array([record.actual_log_rv for record in records])
             if not np.array_equal(actual_log, reference_actual_log):
                 raise ValueError(f"actual values disagree across models for {model}")
@@ -152,7 +162,13 @@ class ForecastEvaluator:
     def evaluate(self, experiment: ExperimentResult) -> EvaluationResult:
         """Calculate losses and requested pairwise model comparisons."""
         grouped = self._aligned_records(experiment)
-        test_specification = self.comparison_test.specification
+        comparison_test = self.comparison_test
+        if self._uses_default_test:
+            comparison_test = DieboldMarianoTest(
+                hac_lags=self._default_hac_lags,
+                min_hac_lags=experiment.target_horizon.sessions - 1,
+            )
+        test_specification = comparison_test.specification
         model_names = set(grouped)
         for baseline, candidate in self.comparison_pairs:
             missing = {baseline, candidate}.difference(model_names)
@@ -185,7 +201,10 @@ class ForecastEvaluator:
                     mean_loss=float(np.mean(losses)),
                 ))
                 loss_records.extend(
-                    LossRecord(model, metric.name, record.target_date, float(loss))
+                    LossRecord(
+                        model, metric.name, record.target_date, float(loss),
+                        origin_date=record.origin_date, target_start_date=record.target_start,
+                    )
                     for record, loss in zip(records, losses, strict=True)
                 )
 
@@ -194,7 +213,7 @@ class ForecastEvaluator:
             for baseline, candidate in self.comparison_pairs:
                 baseline_loss = losses_by_key[(metric.name, baseline)]
                 candidate_loss = losses_by_key[(metric.name, candidate)]
-                test = self.comparison_test.compare(baseline_loss.copy(), candidate_loss.copy())
+                test = comparison_test.compare(baseline_loss.copy(), candidate_loss.copy())
                 comparisons.append(PairwiseComparison(
                     metric=metric.name,
                     baseline_model=baseline,
@@ -215,4 +234,5 @@ class ForecastEvaluator:
             comparisons=tuple(comparisons),
             comparison_test=test_specification if comparisons else None,
             identity=experiment.identity,
+            target_horizon=experiment.target_horizon,
         )

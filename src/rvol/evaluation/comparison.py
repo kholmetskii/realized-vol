@@ -17,6 +17,7 @@ class DieboldMarianoTest:
     """Configured adapter around the existing one-sided Newey-West DM test."""
 
     hac_lags: int | None = None
+    min_hac_lags: int = 0
 
     def __post_init__(self) -> None:
         if self.hac_lags is not None and (
@@ -25,16 +26,28 @@ class DieboldMarianoTest:
             or self.hac_lags < 0
         ):
             raise ValueError("hac_lags must be a non-negative integer or None")
+        if (
+            isinstance(self.min_hac_lags, bool) or not isinstance(self.min_hac_lags, int)
+            or self.min_hac_lags < 0
+        ):
+            raise ValueError("min_hac_lags must be a non-negative integer")
 
     @property
     def specification(self) -> ComponentSpecification:
         return ComponentSpecification(
             "DM", f"{type(self).__module__}.{type(self).__qualname__}",
-            parameters=(("hac_lags", self.hac_lags), ("alternative", "candidate_lower_loss")),
+            parameters=(
+                ("hac_lags", self.hac_lags), ("alternative", "candidate_lower_loss"),
+                ("min_hac_lags", self.min_hac_lags),
+            ),
         )
 
     def compare(self, baseline_loss: FloatArray, candidate_loss: FloatArray) -> ComparisonOutcome:
-        result = diebold_mariano(baseline_loss, candidate_loss, hac_lags=self.hac_lags)
+        lags = self.hac_lags
+        if lags is None and self.min_hac_lags:
+            n_obs = len(_loss_vector(baseline_loss, "baseline_loss"))
+            lags = max(_default_hac_lags(n_obs), self.min_hac_lags)
+        result = diebold_mariano(baseline_loss, candidate_loss, hac_lags=lags)
         return ComparisonOutcome(
             result.statistic, result.p_value, parameters=(("hac_lags", result.hac_lags),),
         )

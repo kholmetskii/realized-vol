@@ -15,6 +15,7 @@ from rvol.domain import (
     ExperimentResult,
     ForecastComparisonTest,
     ForecastMetric,
+    TargetHorizon,
 )
 from rvol.domain.identity import RunIdentity
 from rvol.domain.specifications import ParameterValue
@@ -193,6 +194,7 @@ class LargestErrorsCheck:
 class RobustnessResult:
     checks: tuple[DiagnosticResult, ...]
     identity: RunIdentity = field(default_factory=RunIdentity)
+    target_horizon: TargetHorizon = field(default_factory=TargetHorizon)
 
     def check(self, name: str) -> DiagnosticResult:
         for result in self.checks:
@@ -231,4 +233,6 @@ class ForecastRobustnessAnalyzer:
             if result.specification != snapshot:
                 raise ValueError("diagnostic result must match its configured specification")
             results.append(result)
-        return RobustnessResult(tuple(results), identity=experiment.identity)
+        return RobustnessResult(
+            tuple(results), identity=experiment.identity, target_horizon=experiment.target_horizon,
+        )

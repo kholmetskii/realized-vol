@@ -61,19 +61,25 @@ class RobustnessArtifactWriter:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         for result in robustness.checks:
             frame = pd.DataFrame(result.rows, columns=result.columns)
-            for name, value in asdict(robustness.identity).items():
+            for name, value in (asdict(robustness.identity) | {
+                "horizon_sessions": robustness.target_horizon.sessions,
+                "target_kind": robustness.target_horizon.kind,
+            }).items():
                 frame[name] = value
             atomic_csv(frame, paths.csv(result.name))
         report = (
             "# Forecast robustness report\n\n"
+            f"Target: {robustness.target_horizon.kind}, "
+            f"horizon {robustness.target_horizon.sessions} observed sessions.\n\n"
             "All checks use the fixed model specifications and out-of-sample forecasts. "
             "No model is refitted or selected from these diagnostics.\n\n"
             + "\n".join(sections)
         )
         atomic_text(report, paths.report)
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
             "identity": asdict(robustness.identity),
+            "target": asdict(robustness.target_horizon),
             "checks": [
                 {
                     "specification": asdict(result.specification) | {

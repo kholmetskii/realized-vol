@@ -47,6 +47,8 @@ def plot_forecast_evaluation(
         raise ValueError("experiment must contain forecast records")
     if experiment.identity != evaluation.identity:
         raise ValueError("evaluation identity must match the plotted experiment")
+    if experiment.target_horizon != evaluation.target_horizon:
+        raise ValueError("evaluation target must match the plotted experiment")
 
     records_by_model = defaultdict(list)
     for record in experiment.records:
@@ -116,7 +118,11 @@ def plot_forecast_evaluation(
     forecast_axis.xaxis.set_major_formatter(
         mdates.ConciseDateFormatter(locator, show_offset=False)
     )
-    forecast_axis.set_ylabel("Log realized variance")
+    horizon = experiment.target_horizon
+    forecast_axis.set_ylabel(
+        "Log cumulative realized variance" if horizon.kind == "cumulative"
+        else "Log realized variance"
+    )
     forecast_axis.set_title("Forecast paths")
     forecast_axis.grid(alpha=0.22)
     forecast_axis.legend(frameon=False, ncols=len(ordered_models) + 1, loc="upper center")
@@ -177,5 +183,7 @@ def plot_forecast_evaluation(
     cumulative_axis.grid(alpha=0.22)
     cumulative_axis.legend(frameon=False, fontsize=9)
 
+    if horizon.sessions != 1 or horizon.kind != "session":
+        title += f" — {horizon.kind} target, {horizon.sessions} sessions"
     figure.suptitle(title, fontsize=14)
     return figure

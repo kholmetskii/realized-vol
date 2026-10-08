@@ -9,6 +9,7 @@ from datetime import date
 from rvol.domain.config import ExperimentConfig
 from rvol.domain.identity import RunIdentity
 from rvol.domain.specifications import ExecutionMetadata
+from rvol.domain.targets import TargetHorizon
 
 
 def _require_name(value: str, field: str) -> None:
@@ -18,7 +19,7 @@ def _require_name(value: str, field: str) -> None:
 
 @dataclass(frozen=True)
 class ForecastRecord:
-    """One model's prediction for one target session."""
+    """One model's prediction for a future session or interval."""
 
     model: str
     origin_date: date
@@ -29,11 +30,29 @@ class ForecastRecord:
     fit_date: date | None = None
     train_start_date: date | None = None
     train_end_date: date | None = None
+    target_start_date: date | None = None
+    target_horizon: TargetHorizon = field(default_factory=TargetHorizon)
 
     def __post_init__(self) -> None:
         _require_name(self.model, "model")
         if self.origin_date >= self.target_date:
             raise ValueError("origin_date must precede target_date")
+        if not self.origin_date < self.target_start <= self.target_date:
+            raise ValueError("target start must follow the origin and not exceed target end")
+        if (
+            self.target_horizon.kind == "session" or self.target_horizon.sessions == 1
+        ) and self.target_start != self.target_date:
+            raise ValueError("a single-session target must start and end on its target date")
+        if (
+            self.target_horizon.kind == "cumulative" and self.target_horizon.sessions > 1
+            and self.target_start_date is None
+        ):
+            raise ValueError("cumulative targets require an explicit target start date")
+        if (
+            self.target_horizon.kind == "cumulative" and self.target_horizon.sessions > 1
+            and self.target_start >= self.target_date
+        ):
+            raise ValueError("multi-session cumulative targets must start before their end")
         if self.n_train < 1:
             raise ValueError("n_train must be positive")
         fit_dates = (self.train_start_date, self.train_end_date, self.fit_date)
@@ -58,6 +77,10 @@ class ForecastRecord:
             raise ValueError("log forecast values must represent finite positive variances")
 
     @property
+    def target_start(self) -> date:
+        return self.target_date if self.target_start_date is None else self.target_start_date
+
+    @property
     def actual_rv(self) -> float:
         """Actual realized variance derived from its canonical log value."""
         return math.exp(self.actual_log_rv)
@@ -76,10 +99,13 @@ class ExperimentResult:
     config: ExperimentConfig[object] | None = None
     execution: ExecutionMetadata | None = None
     identity: RunIdentity = field(default_factory=RunIdentity)
+    target_horizon: TargetHorizon = field(default_factory=TargetHorizon)
 
     def __post_init__(self) -> None:
         if self.config is not None and self.config.identity != self.identity:
             raise ValueError("experiment identity must match its run configuration")
+        if any(record.target_horizon != self.target_horizon for record in self.records):
+            raise ValueError("forecast target horizons must match the experiment target")
 
     @property
     def models(self) -> tuple[str, ...]:

@@ -18,7 +18,9 @@ PACKAGE_DEPENDENCIES = {
         "plotting",
         "reporting",
     },
-    "composition": {"application", "composition", "domain", "evaluation", "features", "models"},
+    "composition": {
+        "application", "composition", "domain", "evaluation", "features", "models", "targets",
+    },
     "data": {"data"},
     "diagnostics": {"diagnostics", "features", "market"},
     "estimators": {"estimators"},
@@ -37,6 +39,7 @@ PACKAGE_DEPENDENCIES = {
     },
     "reporting": {"domain", "evaluation", "reporting"},
     "simulation": {"simulation"},
+    "targets": {"domain", "market", "targets"},
 }
 
 def rvol_dependencies(path: pathlib.Path) -> set[str]:

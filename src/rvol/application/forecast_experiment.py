@@ -10,7 +10,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
-from rvol.application._forecast_data import validated_features, validated_models
+from rvol.application._forecast_data import target_horizon, validated_features, validated_models
 from rvol.domain.config import ExperimentConfig
 from rvol.domain.contracts import FittedForecaster, Forecaster, UpdatablePredictor
 from rvol.domain.results import ExperimentResult, ForecastRecord
@@ -84,6 +84,7 @@ class WalkForwardExperiment:
     def run(self, features: pd.DataFrame) -> ExperimentResult:
         """Fit or update at each origin and report forecasts within date bounds."""
         frame = validated_features(features, self.models)
+        horizon = target_horizon(frame)
         settings = self.config.execution.specification
         plan = self._execution_plan(frame)
         anchor = plan[0].origin_date if plan else None
@@ -103,6 +104,7 @@ class WalkForwardExperiment:
         if first_output is None:
             return ExperimentResult(
                 config=self.config, execution=execution, identity=self.config.identity,
+                target_horizon=horizon,
             )
 
         # Earlier fits are superseded by the last scheduled fit before output.
@@ -165,6 +167,10 @@ class WalkForwardExperiment:
                     n_train=fit_step.training_slice.stop - fit_step.training_slice.start,
                     actual_log_rv=actual_log_rv,
                     predicted_log_rv=float(prediction[0]),
+                    target_start_date=cast(
+                        pd.Timestamp, frame["target_start_date"].iloc[step.position],
+                    ).date(),
+                    target_horizon=horizon,
                     fit_date=fit_step.origin_date,
                     train_start_date=train_start.date(),
                     train_end_date=train_end.date(),
@@ -173,4 +179,5 @@ class WalkForwardExperiment:
         return ExperimentResult(
             records=tuple(records), config=self.config, execution=execution,
             identity=self.config.identity,
+            target_horizon=horizon,
         )

@@ -9,11 +9,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.application import WalkForwardExperiment
+from rvol.application import WalkForwardExperiment, prepare_forecast_data
 from rvol.domain import ExperimentConfig, WalkForwardSettings
 from rvol.evaluation import ForecastEvaluator
 from rvol.features.forecasting import build_har_features
 from rvol.models import HARForecaster, NaiveForecaster
+from rvol.targets import RealizedVarianceTargetBuilder
 
 
 @pytest.fixture(scope="module")
@@ -32,7 +33,9 @@ def characterized_pipeline():
         "log_rv": log_rv,
         "observation_count": np.full(n_sessions, 288),
     })
-    features = build_har_features(daily)
+    features = prepare_forecast_data(
+        build_har_features(daily), RealizedVarianceTargetBuilder()(daily),
+    )
     experiment = WalkForwardExperiment(
         models=(NaiveForecaster(), HARForecaster()),
         config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=25)),

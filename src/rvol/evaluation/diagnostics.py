@@ -55,8 +55,8 @@ class DiagnosticResult:
             raise ValueError("diagnostic title, columns and report columns must not be empty")
         if len(set(self.columns)) != len(self.columns):
             raise ValueError("diagnostic column names must be unique")
-        if {"run_id", "fold_id"}.intersection(self.columns):
-            raise ValueError("diagnostic columns must not override run/fold identity")
+        if {"run_id", "fold_id", "horizon_sessions", "target_kind"}.intersection(self.columns):
+            raise ValueError("diagnostic columns must not override run identity or target metadata")
         if any(len(row) != len(self.columns) for row in self.rows):
             raise ValueError("diagnostic rows must match their columns")
         names = [name for name, _ in self.components]

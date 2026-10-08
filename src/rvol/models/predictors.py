@@ -34,13 +34,17 @@ class FeatureColumnPredictor:
 
     n_features: int
     column: int = 0
+    offset: float = 0.0
 
     def __post_init__(self) -> None:
         if self.n_features < 1:
             raise ValueError("n_features must be positive")
         if not 0 <= self.column < self.n_features:
             raise ValueError("column must identify an available feature")
+        if not np.isfinite(self.offset):
+            raise ValueError("prediction offset must be finite")
 
     def predict(self, features: FloatArray) -> FloatArray:
         matrix = validated_features(features, self.n_features)
-        return matrix[:, self.column].copy()
+        result = matrix[:, self.column].copy()
+        return result if self.offset == 0 else result + self.offset

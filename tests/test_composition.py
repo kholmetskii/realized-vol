@@ -25,6 +25,7 @@ from rvol.domain import (
 )
 from rvol.evaluation import LogMSEMetric
 from rvol.models import HistoricalMeanForecaster, NaiveForecaster
+from rvol.targets import RealizedVarianceTargetBuilder
 
 
 def daily_sample(n_sessions: int = 50) -> pd.DataFrame:
@@ -113,15 +114,14 @@ def test_definition_supports_other_feature_builders_models_metrics_and_candidate
 
         def __call__(self, daily: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame({
-                "origin_date": daily["date"].iloc[:-1].to_numpy(),
-                "target_date": daily["date"].iloc[1:].to_numpy(),
-                "rv_daily": daily["log_rv"].iloc[:-1].to_numpy(),
-                "target": daily["log_rv"].iloc[1:].to_numpy(),
+                "origin_date": daily["date"],
+                "rv_daily": daily["log_rv"],
             })
 
     definition = ExperimentDefinition(
         models=(HistoricalMeanForecaster(), NaiveForecaster()),
         feature_builder=DailyFeatures(),
+        target_builder=RealizedVarianceTargetBuilder(),
         executor_factory=WalkForwardExperiment,
         metrics=(LogMSEMetric(),),
         comparison_pairs=(("historical_mean", "naive"),),
@@ -170,7 +170,9 @@ def test_definition_rejects_references_to_models_that_are_not_configured():
 
 
 def test_definition_delegates_to_an_independent_executor_with_prepared_features():
-    prepared = pd.DataFrame({"custom_input": [1.0, 2.0]})
+    features = pd.DataFrame({
+        "origin_date": pd.bdate_range("2022-01-03", periods=2), "custom_input": [1.0, 2.0],
+    })
 
     @dataclass(frozen=True)
     class CustomSettings:
@@ -180,7 +182,7 @@ def test_definition_delegates_to_an_independent_executor_with_prepared_features(
         specification = ComponentSpecification("custom", "test.CustomFeatures")
 
         def __call__(self, daily: pd.DataFrame) -> pd.DataFrame:
-            return prepared.copy()
+            return features.copy()
 
     class CustomExecutor:
         def __init__(self, models: Sequence[Forecaster], config: ExperimentConfig[CustomSettings]):
@@ -213,6 +215,7 @@ def test_definition_delegates_to_an_independent_executor_with_prepared_features(
         candidate_model="historical_mean", baseline_models=(),
     )
     daily = daily_sample()
+    prepared = definition.prepare(daily)
     unchanged = daily.copy(deep=True)
     configs = (ExperimentConfig(execution=CustomSettings(10)),
                ExperimentConfig(execution=CustomSettings(15)))

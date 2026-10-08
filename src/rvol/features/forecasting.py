@@ -1,19 +1,19 @@
-"""Leakage-safe features for realized-volatility forecasting."""
+"""Past-only features for realized-volatility forecasting."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import ClassVar
 
-import numpy as np
 import pandas as pd
 
 from rvol.domain.specifications import ComponentSpecification
+from rvol.market.daily import ordered_log_variance, validate_daily_columns
 
 
 @dataclass(frozen=True)
 class HARFeatureBuilder:
-    """Bind HAR feature settings to both preparation and experiment metadata."""
+    """Build HAR inputs at each origin, independently of future outcomes."""
 
     date_col: str = "date"
     rv_col: str = "log_rv"
@@ -22,6 +22,20 @@ class HARFeatureBuilder:
     max_gap_days: int | None = 7
 
     feature_names: ClassVar[tuple[str, ...]] = ("rv_daily", "rv_weekly", "rv_monthly")
+
+    def __post_init__(self) -> None:
+        validate_daily_columns(self.date_col, self.rv_col)
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 1 for value in (
+            self.weekly_window, self.monthly_window,
+        )):
+            raise ValueError("HAR window sizes must be positive integers")
+        if self.monthly_window < self.weekly_window:
+            raise ValueError("monthly_window must be at least weekly_window")
+        if self.max_gap_days is not None and (
+            isinstance(self.max_gap_days, bool) or not isinstance(self.max_gap_days, int)
+            or self.max_gap_days < 1
+        ):
+            raise ValueError("max_gap_days must be a positive integer or None")
 
     @property
     def specification(self) -> ComponentSpecification:
@@ -39,73 +53,32 @@ class HARFeatureBuilder:
         )
 
     def __call__(self, daily: pd.DataFrame) -> pd.DataFrame:
-        return build_har_features(
-            daily,
-            date_col=self.date_col,
-            rv_col=self.rv_col,
-            weekly_window=self.weekly_window,
-            monthly_window=self.monthly_window,
-            max_gap_days=self.max_gap_days,
+        ordered = ordered_log_variance(
+            daily, date_col=self.date_col, rv_col=self.rv_col, max_gap_days=self.max_gap_days,
         )
+        log_rv = ordered["log_rv"]
+        return pd.DataFrame({
+            "origin_date": ordered["date"],
+            "rv_daily": log_rv,
+            "rv_weekly": log_rv.rolling(self.weekly_window).mean(),
+            "rv_monthly": log_rv.rolling(self.monthly_window).mean(),
+        }).dropna().reset_index(drop=True)
 
 
 def build_har_features(
-    daily: pd.DataFrame,
-    *,
+    daily: pd.DataFrame, *,
     date_col: str = HARFeatureBuilder.date_col,
     rv_col: str = HARFeatureBuilder.rv_col,
     weekly_window: int = HARFeatureBuilder.weekly_window,
     monthly_window: int = HARFeatureBuilder.monthly_window,
     max_gap_days: int | None = HARFeatureBuilder.max_gap_days,
 ) -> pd.DataFrame:
-    """Build one-step-ahead daily, weekly, and monthly HAR-RV features.
+    """Return past-only HAR inputs, including the latest observed session.
 
-    Each row is a forecast made after ``origin_date`` for ``target_date``, the
-    following observed session. Rolling windows count trading sessions rather
-    than calendar days, so weekends and market holidays do not create gaps.
+    Rolling windows count observed sessions. Warm-up rows without enough
+    history are omitted; future labels are built and aligned separately.
     """
-    missing = {date_col, rv_col}.difference(daily.columns)
-    if missing:
-        names = ", ".join(sorted(missing))
-        raise ValueError(f"daily data is missing required columns: {names}")
-    if weekly_window < 1:
-        raise ValueError("weekly_window must be positive")
-    if monthly_window < weekly_window:
-        raise ValueError("monthly_window must be at least weekly_window")
-    if max_gap_days is not None and max_gap_days < 1:
-        raise ValueError("max_gap_days must be positive or None")
-
-    dates = pd.to_datetime(daily[date_col], errors="coerce")
-    values = pd.to_numeric(daily[rv_col], errors="coerce")
-    valid = dates.notna() & np.isfinite(values)
-    if not valid.all():
-        invalid = int((~valid).sum())
-        raise ValueError(f"daily data contains {invalid} invalid dates or {rv_col} values")
-
-    ordered = pd.DataFrame({"date": dates, "log_rv": values.astype("float64")})
-    ordered = ordered.sort_values("date").reset_index(drop=True)
-    if ordered["date"].duplicated().any():
-        raise ValueError("daily data must contain one row per session date")
-    if max_gap_days is not None:
-        ordered_dates = pd.DatetimeIndex(ordered["date"])
-        gap_days = ordered["date"].diff().dt.total_seconds() / (24 * 60 * 60)
-        large = gap_days > max_gap_days
-        if large.any():
-            position = int(np.flatnonzero(large.to_numpy())[0])
-            previous = ordered_dates[position - 1].date()
-            following = ordered_dates[position].date()
-            days = int(gap_days.iloc[position])
-            raise ValueError(
-                f"daily data contains a {days}-day gap from {previous} to {following}"
-            )
-
-    log_rv = ordered["log_rv"]
-    features = pd.DataFrame({
-        "origin_date": ordered["date"],
-        "target_date": ordered["date"].shift(-1),
-        "rv_daily": log_rv,
-        "rv_weekly": log_rv.rolling(weekly_window).mean(),
-        "rv_monthly": log_rv.rolling(monthly_window).mean(),
-        "target": log_rv.shift(-1),
-    })
-    return features.dropna().reset_index(drop=True)
+    return HARFeatureBuilder(
+        date_col=date_col, rv_col=rv_col, weekly_window=weekly_window,
+        monthly_window=monthly_window, max_gap_days=max_gap_days,
+    )(daily)

@@ -17,6 +17,7 @@ from rvol.domain import (
     HoldoutSettings,
     RollingWindow,
     RunIdentity,
+    TargetHorizon,
     WalkForwardSettings,
 )
 
@@ -50,6 +51,14 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--forecast-end", type=iso_date, help="last target date to evaluate")
     parser.add_argument("--run-id", default="default", help="identity of this experiment run")
     parser.add_argument("--fold-id", help="optional validation fold identity")
+    parser.add_argument(
+        "--horizon", type=positive_integer, default=1,
+        help="forecast horizon in observed sessions (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--target-kind", choices=("session", "cumulative"), default="session",
+        help="future-session variance or sum over the next N sessions (default: %(default)s)",
+    )
     parser.add_argument(
         "--executor", choices=("walk-forward", "holdout"), default="walk-forward",
         help="experiment execution method (default: %(default)s)",
@@ -86,6 +95,7 @@ def experiment_run_from_args(
     """Bind executor and typed settings; reject incompatible options before I/O."""
     try:
         identity = RunIdentity(args.run_id, args.fold_id)
+        horizon = TargetHorizon(args.horizon, args.target_kind)
         if args.executor == "holdout":
             for option in ("training_window", "window_size", "retrain_every"):
                 if getattr(args, option) is not None:
@@ -101,7 +111,7 @@ def experiment_run_from_args(
                 update_observations=args.update_observations,
             )
             return ExperimentRun(
-                definition=holdout_experiment_definition(),
+                definition=holdout_experiment_definition(target_horizon=horizon),
                 config=ExperimentConfig(
                     execution=holdout, forecast_start=args.forecast_start,
                     forecast_end=args.forecast_end,
@@ -130,7 +140,7 @@ def experiment_run_from_args(
             ),
         )
         return ExperimentRun(
-            definition=standard_experiment_definition(),
+            definition=standard_experiment_definition(target_horizon=horizon),
             config=ExperimentConfig(
                 execution=walk_forward, forecast_start=args.forecast_start,
                 forecast_end=args.forecast_end,

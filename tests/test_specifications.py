@@ -41,6 +41,7 @@ def test_experiment_specification_rejects_missing_feature_inputs():
     with pytest.raises(ValueError, match="missing model inputs: rv_daily"):
         ExperimentSpecification(
             features=ComponentSpecification("features", "test.Features"),
+            target=ComponentSpecification("target", "test.Target"),
             models=(ComponentSpecification("AR1", "test.AR1", feature_names=("rv_daily",)),),
         )
 
