@@ -139,9 +139,99 @@ requested HAC lags and top-error count. The existing
 
 Direct `ForecastEvaluator` calls calculate loss summaries without implicit
 model comparisons; pass `comparison_pairs` explicitly when needed. Direct
-`ForecastRobustnessAnalyzer` and `plot_forecast_evaluation` calls require their
-candidate (and robustness baselines) explicitly. These numerical and plotting
+`plot_forecast_evaluation` calls require their candidate explicitly. Comparison
+diagnostics require a candidate and baselines; descriptive checks can run without
+them. These numerical and plotting
 components do not select the project's model names.
+
+Comparison tests implement `ForecastComparisonTest`: a `specification` property
+and `compare(baseline_loss, candidate_loss) -> ComparisonOutcome`. Loss vectors
+are aligned chronologically. The common alternative is that the candidate has
+lower expected loss; each test validates its own sample requirements.
+`DieboldMarianoTest(hac_lags=None)` remains the default. It wraps the original
+one-sided DM calculation and records the resolved Newey–West lag count in each
+outcome. Generic results expose `test_name`, `statistic`, `p_value`, and immutable
+`test_parameters`, alongside the model names and mean losses.
+
+    from dataclasses import replace
+    from rvol.evaluation import DieboldMarianoTest
+
+    definition = replace(
+        standard_experiment_definition(),
+        comparison_test=DieboldMarianoTest(hac_lags=5),
+    )
+    evaluation = definition.evaluator().evaluate(experiment)
+
+Replace that object with an independent test to use the same evaluator and
+artifact writer. The `hac_lags` convenience override applies only to DM; custom
+tests carry their own settings.
+
+Robustness analysis receives independent `DiagnosticCheck` objects. The built-in
+checks are `LagSensitivityCheck`, `MonthlyLossCheck`, `WinRateCheck`, and
+`LargestErrorsCheck`. The analyzer calculates a shared loss table, then runs
+only the selected checks. Descriptive checks work even when a sample is too
+short for a statistical comparison.
+
+    from rvol.evaluation import MonthlyLossCheck, LargestErrorsCheck
+
+    analyzer = definition.robustness_analyzer(
+        checks=(MonthlyLossCheck(), LargestErrorsCheck(top_errors=3)),
+    )
+    robustness = analyzer.analyze(experiment)
+
+Each check supplies a `DiagnosticResult` with immutable rows, CSV columns,
+report labels and formatting templates. `RobustnessArtifactWriter` renders these
+tables without branches for particular checks. Independent checks implement
+the same protocol. `robustness.check(name)` selects a completed table;
+`paths.csv(name)` selects its artifact. The former fixed result fields and path
+attributes have been removed.
+
+The robustness command accepts repeated `--check` options (`hac_sensitivity`,
+`win_rates`, `monthly_losses`, `largest_errors`). Omitting them retains all four
+checks. For example, add `--check monthly_losses --check largest_errors` to
+generate only those tables and report sections. `robustness.json` schema 2
+records the selected checks, their settings, and nested comparison-test
+specifications. The sensitivity CSV uses the generic `statistic` column.
+
+Run and fold identities belong to shared configuration:
+
+    from dataclasses import replace
+    from datetime import date
+    from rvol.domain import RunIdentity
+    from rvol.reporting import ValidationArtifactWriter
+
+    first = definition.run(daily, replace(
+        config, identity=RunIdentity("eurusd", "fold_a"),
+        forecast_start=date(2025, 1, 1), forecast_end=date(2025, 6, 30),
+    ))
+    second = definition.run(daily, replace(
+        config, identity=RunIdentity("eurusd", "fold_b"),
+        forecast_start=date(2025, 4, 1), forecast_end=date(2025, 9, 30),
+    ))
+    validation = definition.evaluator().evaluate_runs((first, second))
+    ValidationArtifactWriter("outputs/validation").write(validation)
+
+The pair `(run_id, fold_id)` identifies one independently scored run. All three
+forecast commands accept `--run-id` and optional `--fold-id`; the deterministic
+standalone default is `("default", None)`. Collections reject duplicate
+identities, so independent default runs must be named before combining them.
+Each run keeps its own forecasts, loss alignment and comparison tests, even
+when fold dates overlap. This API scores explicitly constructed folds; it does
+not select settings or generate train/test splits automatically.
+
+The default `aggregation="equal_run"` averages per-run mean losses, giving each
+identified run/fold equal weight. `aggregation="pooled"` weights those means by
+their forecast counts. Overlapping dates remain separate forecast cases in
+both modes; `n_forecasts` counts those cases, not independent observations.
+Runs must contain identical model and metric sets. Statistical tests are
+reported within each run/fold; p-values are not pooled across folds.
+
+Validation artifacts retain run/fold IDs in per-date losses, per-run summaries
+and comparisons, alongside aggregate loss summaries. `validation.json` schema 1
+records identities and aggregation rules. Single-run forecast artifacts use
+schema 6 and append `run_id`/`fold_id` to their CSVs. Robustness metadata uses
+schema 2 and adds the same identity columns to diagnostic CSVs. Evaluation and
+plotting reject mismatched run identities.
 
 Models and feature builders expose an immutable `ComponentSpecification` with
 an implementation identifier, ordered feature names and scalar settings.
@@ -409,7 +499,7 @@ difference favours the candidate.
 When `--output-dir` is provided, the same run also writes normalized forecasts,
 mean losses, pairwise comparisons, and JSON experiment metadata. The metadata
 records dataset coverage and a SHA-256 fingerprint so the exact input can be
-verified later. JSON schema version 4 records a `specification` object
+verified later. JSON schema version 6 records a `specification` object
 containing the feature builder and each model's implementation, ordered feature
 names and settings, including EWMA decay and HAR's training-residual smearing
 correction. HAR windows count observed sessions; `max_gap_days` is a calendar-day
@@ -421,10 +511,14 @@ full dataset's schedule anchor and the observation-update rule.
 `train_end_date`; its existing columns retain their order. The training count
 and boundaries describe the last actual fit, even when a predictor has since
 consumed new observations. Loss and comparison CSV layouts are unchanged.
-Readers that check `schema_version` must accept version 4. Execution metadata
+Readers that check `schema_version` must accept version 6. Execution metadata
 now contains `executor`, `settings`, named `policies`, and runtime `facts`.
 `min_train_size` belongs to execution settings, rather than shared experiment
 bounds. Repeating an unchanged run produces byte-identical artifacts.
+`evaluation.comparison_test` identifies the configured statistical test.
+`comparisons.csv` uses generic `test_name` and `statistic` columns; resolved test
+settings are JSON in `test_parameters`, replacing the DM-specific statistic and
+HAC columns. Forecasts and loss-summary values are unchanged by this migration.
 
 The artifact writer requires a completed runner result with its execution
 snapshot and fit boundaries. It rejects configuration or strategy metadata

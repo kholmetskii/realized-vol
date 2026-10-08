@@ -1,187 +1,234 @@
-"""Robustness diagnostics for out-of-sample forecast comparisons."""
+"""Composable robustness checks for fixed out-of-sample forecast results."""
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import asdict, dataclass, field
 from datetime import date
 
 import numpy as np
 
-from rvol.domain import ExperimentResult
-from rvol.domain.contracts import ForecastMetric
-from rvol.evaluation.evaluator import ForecastEvaluator, PairwiseComparison
-from rvol.evaluation.metrics import LogMSEMetric, QLikeMetric
+from rvol.domain import (
+    ComponentSpecification,
+    ExperimentResult,
+    ForecastComparisonTest,
+    ForecastMetric,
+)
+from rvol.domain.identity import RunIdentity
+from rvol.domain.specifications import ParameterValue
+from rvol.evaluation.comparison import DieboldMarianoTest
+from rvol.evaluation.diagnostics import (
+    DiagnosticCheck,
+    DiagnosticContext,
+    DiagnosticResult,
+    DiagnosticValue,
+    validate_checks,
+)
+from rvol.evaluation.evaluator import ForecastEvaluator
+
+
+def _specification(
+    check: object, name: str, parameters: tuple[tuple[str, ParameterValue], ...] = (),
+) -> ComponentSpecification:
+    return ComponentSpecification(
+        name, f"{type(check).__module__}.{type(check).__qualname__}", parameters=parameters,
+    )
 
 
 @dataclass(frozen=True)
-class MonthlyLossSummary:
-    """Mean loss for one model and calendar month."""
+class LagSensitivityCheck:
+    hac_lags: tuple[int, ...] = tuple(range(6))
+    test_factory: Callable[[int], ForecastComparisonTest] = DieboldMarianoTest
 
-    month: str
-    model: str
-    metric: str
-    n_obs: int
-    mean_loss: float
+    def __post_init__(self) -> None:
+        if not self.hac_lags or len(set(self.hac_lags)) != len(self.hac_lags) or any(
+            isinstance(lag, bool) or not isinstance(lag, int) or lag < 0 for lag in self.hac_lags
+        ):
+            raise ValueError("hac_lags must be non-empty, unique, non-negative integers")
+
+    @property
+    def specification(self) -> ComponentSpecification:
+        return _specification(self, "hac_sensitivity", (
+            ("hac_lags", ",".join(map(str, self.hac_lags))),
+        ))
+
+    def run(self, context: DiagnosticContext) -> DiagnosticResult:
+        rows = []
+        components = []
+        columns = (
+            "metric", "baseline_model", "candidate_model", "n_obs", "baseline_mean_loss",
+            "candidate_mean_loss", "mean_loss_difference", "test_name", "statistic", "p_value",
+            "test_parameters", "hac_lags",
+        )
+        for lag in self.hac_lags:
+            test = self.test_factory(lag)
+            evaluation = ForecastEvaluator(
+                metrics=context.metrics, comparison_pairs=context.comparison_pairs,
+                comparison_test=test,
+            ).evaluate(context.experiment)
+            assert evaluation.comparison_test is not None
+            components.append((f"lag_{lag}", evaluation.comparison_test))
+            for comparison in evaluation.comparisons:
+                row = asdict(comparison) | {
+                    "test_parameters": json.dumps(dict(comparison.test_parameters), sort_keys=True),
+                    "hac_lags": lag,
+                }
+                rows.append(tuple(row[column] for column in columns))
+        rows.sort(key=lambda row: (row[0], row[1], row[2], row[-1]))
+        return DiagnosticResult(
+            self.specification, "Newey–West lag sensitivity", columns, tuple(rows),
+            (("Metric", "{metric}"), ("Baseline", "{baseline_model}"),
+             ("Candidate", "{candidate_model}"), ("NW lags", "{hac_lags}"),
+             ("Statistic", "{statistic:.3f}"), ("p-value", "{p_value:.4g}")),
+            components=tuple(components),
+        )
 
 
 @dataclass(frozen=True)
-class WinRateSummary:
-    """Share of target sessions where a candidate has lower loss."""
+class MonthlyLossCheck:
+    @property
+    def specification(self) -> ComponentSpecification:
+        return _specification(self, "monthly_losses")
 
-    metric: str
-    baseline_model: str
-    candidate_model: str
-    n_obs: int
-    candidate_wins: int
-    ties: int
-    candidate_win_rate: float
+    def run(self, context: DiagnosticContext) -> DiagnosticResult:
+        values: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+        for loss in context.evaluation.losses:
+            values[(loss.target_date.strftime("%Y-%m"), loss.metric, loss.model)].append(loss.loss)
+        rows = tuple(
+            (month, model, metric, len(losses), float(np.mean(losses)))
+            for (month, metric, model), losses in sorted(values.items())
+        )
+        return DiagnosticResult(
+            self.specification, "Monthly forecast losses",
+            ("month", "model", "metric", "n_obs", "mean_loss"), rows,
+            (("Month", "{month}"), ("Metric", "{metric}"), ("Model", "{model}"),
+             ("n", "{n_obs}"), ("Mean loss", "{mean_loss:.6g}")),
+        )
 
 
 @dataclass(frozen=True)
-class ForecastErrorRecord:
-    """One unusually large forecast error measured on the log-RV scale."""
+class WinRateCheck:
+    tie_rtol: float = 1e-5
+    tie_atol: float = 1e-8
 
-    model: str
-    target_date: date
-    actual_log_rv: float
-    predicted_log_rv: float
-    absolute_log_error: float
+    def __post_init__(self) -> None:
+        if any(not np.isfinite(value) or value < 0 for value in (self.tie_rtol, self.tie_atol)):
+            raise ValueError("tie tolerances must be finite and non-negative")
+
+    @property
+    def specification(self) -> ComponentSpecification:
+        return _specification(self, "win_rates", (
+            ("tie_rtol", self.tie_rtol), ("tie_atol", self.tie_atol),
+        ))
+
+    def run(self, context: DiagnosticContext) -> DiagnosticResult:
+        losses: dict[tuple[str, str], dict[date, float]] = defaultdict(dict)
+        for loss in context.evaluation.losses:
+            losses[(loss.metric, loss.model)][loss.target_date] = loss.loss
+        rows = []
+        for metric in context.metrics:
+            for baseline, candidate_model in context.comparison_pairs:
+                candidate_losses = losses[(metric.name, candidate_model)]
+                baseline_losses = losses[(metric.name, baseline)]
+                dates = sorted(candidate_losses)
+                candidate = np.array([candidate_losses[day] for day in dates])
+                benchmark = np.array([baseline_losses[day] for day in dates])
+                tie_mask = np.isclose(candidate, benchmark, rtol=self.tie_rtol, atol=self.tie_atol)
+                ties = int(np.count_nonzero(tie_mask))
+                wins = int(np.count_nonzero((candidate < benchmark) & ~tie_mask))
+                rows.append((
+                    metric.name, baseline, candidate_model, len(dates),
+                    wins, ties, wins / len(dates),
+                ))
+        rows.sort(key=lambda row: (row[0], row[1]))
+        return DiagnosticResult(
+            self.specification, "Candidate session-level win rates",
+            ("metric", "baseline_model", "candidate_model", "n_obs", "candidate_wins", "ties",
+             "candidate_win_rate"), tuple(rows),
+            (("Metric", "{metric}"), ("Baseline", "{baseline_model}"),
+             ("Candidate", "{candidate_model}"), ("Wins", "{candidate_wins}/{n_obs}"),
+             ("Ties", "{ties}"), ("Win rate", "{candidate_win_rate:.1%}")),
+        )
+
+
+@dataclass(frozen=True)
+class LargestErrorsCheck:
+    top_errors: int = 5
+
+    def __post_init__(self) -> None:
+        if isinstance(self.top_errors, bool) or not isinstance(self.top_errors, int) \
+                or self.top_errors < 1:
+            raise ValueError("top_errors must be a positive integer")
+
+    @property
+    def specification(self) -> ComponentSpecification:
+        return _specification(self, "largest_errors", (("top_errors", self.top_errors),))
+
+    def run(self, context: DiagnosticContext) -> DiagnosticResult:
+        rows: list[tuple[DiagnosticValue, ...]] = []
+        for model in context.experiment.models:
+            records = sorted(
+                (record for record in context.experiment.records if record.model == model),
+                key=lambda record: (
+                    -abs(record.actual_log_rv - record.predicted_log_rv), record.target_date,
+                ),
+            )
+            rows.extend((
+                model, record.target_date, record.actual_log_rv, record.predicted_log_rv,
+                abs(record.actual_log_rv - record.predicted_log_rv),
+            ) for record in records[:self.top_errors])
+        return DiagnosticResult(
+            self.specification, "Largest absolute log-RV errors",
+            ("model", "target_date", "actual_log_rv", "predicted_log_rv", "absolute_log_error"),
+            tuple(rows),
+            (("Model", "{model}"), ("Target", "{target_date}"),
+             ("Actual log RV", "{actual_log_rv:.6f}"), ("Predicted", "{predicted_log_rv:.6f}"),
+             ("Absolute error", "{absolute_log_error:.6f}")),
+        )
 
 
 @dataclass(frozen=True)
 class RobustnessResult:
-    """Sensitivity tests and descriptive forecast diagnostics."""
+    checks: tuple[DiagnosticResult, ...]
+    identity: RunIdentity = field(default_factory=RunIdentity)
 
-    hac_comparisons: tuple[PairwiseComparison, ...]
-    monthly_losses: tuple[MonthlyLossSummary, ...]
-    win_rates: tuple[WinRateSummary, ...]
-    largest_errors: tuple[ForecastErrorRecord, ...]
+    def check(self, name: str) -> DiagnosticResult:
+        for result in self.checks:
+            if result.name == name:
+                return result
+        raise KeyError(name)
 
 
 class ForecastRobustnessAnalyzer:
-    """Run predefined checks without changing or refitting model specifications."""
+    """Run injected diagnostics against one shared evaluation without model fitting."""
 
     def __init__(
-        self,
-        *,
-        candidate_model: str,
-        baseline_models: Sequence[str],
-        metrics: Sequence[ForecastMetric] | None = None,
-        hac_lags: Sequence[int] = tuple(range(6)),
-        top_errors: int = 5,
+        self, checks: Sequence[DiagnosticCheck], *, metrics: Sequence[ForecastMetric] | None = None,
+        candidate_model: str | None = None, baseline_models: Sequence[str] = (),
     ) -> None:
-        baselines = tuple(baseline_models)
-        lags = tuple(hac_lags)
-        selected_metrics = (
-            (QLikeMetric(), LogMSEMetric())
-            if metrics is None
-            else tuple(metrics)
-        )
-        if not candidate_model.strip():
-            raise ValueError("candidate_model must not be empty")
-        if not baselines or len(baselines) != len(set(baselines)):
-            raise ValueError("baseline_models must be non-empty and unique")
-        if candidate_model in baselines:
-            raise ValueError("candidate_model must not also be a baseline")
-        if not selected_metrics:
-            raise ValueError("at least one metric is required")
-        if not lags or len(lags) != len(set(lags)) or any(lag < 0 for lag in lags):
-            raise ValueError("hac_lags must be non-empty, unique, and non-negative")
-        if top_errors < 1:
-            raise ValueError("top_errors must be positive")
+        self.checks = validate_checks(checks)
+        self.evaluator = ForecastEvaluator(metrics=metrics)
         self.candidate_model = candidate_model
-        self.baseline_models = baselines
-        self.metrics = selected_metrics
-        self.hac_lags = lags
-        self.top_errors = top_errors
+        self.baseline_models = tuple(baseline_models)
+        if candidate_model is not None and not candidate_model.strip():
+            raise ValueError("candidate_model must not be empty")
+        if len(set(self.baseline_models)) != len(self.baseline_models):
+            raise ValueError("baseline_models must be unique")
+        if candidate_model in self.baseline_models:
+            raise ValueError("candidate_model must not also be a baseline")
 
     def analyze(self, experiment: ExperimentResult) -> RobustnessResult:
-        """Calculate sensitivity and descriptive checks for one fixed experiment."""
-        pairs = tuple(
-            (baseline, self.candidate_model)
-            for baseline in self.baseline_models
+        context = DiagnosticContext(
+            experiment, self.evaluator.evaluate(experiment), self.evaluator.metrics,
+            self.candidate_model, self.baseline_models,
         )
-        evaluations = [
-            ForecastEvaluator(
-                metrics=self.metrics,
-                comparison_pairs=pairs,
-                hac_lags=lag,
-            ).evaluate(experiment)
-            for lag in self.hac_lags
-        ]
-        reference = evaluations[0]
-        hac_comparisons = tuple(
-            comparison
-            for evaluation in evaluations
-            for comparison in evaluation.comparisons
-        )
-
-        monthly_values: dict[tuple[str, str, str], list[float]] = defaultdict(list)
-        losses_by_key: dict[tuple[str, str], dict[date, float]] = defaultdict(dict)
-        for loss in reference.losses:
-            month = loss.target_date.strftime("%Y-%m")
-            monthly_values[(month, loss.metric, loss.model)].append(loss.loss)
-            losses_by_key[(loss.metric, loss.model)][loss.target_date] = loss.loss
-        monthly_losses = tuple(
-            MonthlyLossSummary(
-                month=month,
-                metric=metric,
-                model=model,
-                n_obs=len(values),
-                mean_loss=float(np.mean(values)),
-            )
-            for (month, metric, model), values in sorted(monthly_values.items())
-        )
-
-        win_rates: list[WinRateSummary] = []
-        for metric in self.metrics:
-            candidate_losses = losses_by_key[(metric.name, self.candidate_model)]
-            for baseline in self.baseline_models:
-                baseline_losses = losses_by_key[(metric.name, baseline)]
-                if set(baseline_losses) != set(candidate_losses):
-                    raise ValueError("candidate and baseline loss dates must align")
-                dates = sorted(candidate_losses)
-                candidate = np.array([candidate_losses[item] for item in dates])
-                benchmark = np.array([baseline_losses[item] for item in dates])
-                tie_mask = np.isclose(candidate, benchmark)
-                ties = int(np.count_nonzero(tie_mask))
-                wins = int(np.count_nonzero((candidate < benchmark) & ~tie_mask))
-                win_rates.append(WinRateSummary(
-                    metric=metric.name,
-                    baseline_model=baseline,
-                    candidate_model=self.candidate_model,
-                    n_obs=len(dates),
-                    candidate_wins=wins,
-                    ties=ties,
-                    candidate_win_rate=wins / len(dates),
-                ))
-
-        records_by_model = defaultdict(list)
-        for record in experiment.records:
-            records_by_model[record.model].append(record)
-        largest_errors: list[ForecastErrorRecord] = []
-        for model in sorted(records_by_model):
-            ranked = sorted(
-                records_by_model[model],
-                key=lambda record: abs(record.actual_log_rv - record.predicted_log_rv),
-                reverse=True,
-            )
-            largest_errors.extend(
-                ForecastErrorRecord(
-                    model=model,
-                    target_date=record.target_date,
-                    actual_log_rv=record.actual_log_rv,
-                    predicted_log_rv=record.predicted_log_rv,
-                    absolute_log_error=abs(record.actual_log_rv - record.predicted_log_rv),
-                )
-                for record in ranked[: self.top_errors]
-            )
-
-        return RobustnessResult(
-            hac_comparisons=hac_comparisons,
-            monthly_losses=monthly_losses,
-            win_rates=tuple(win_rates),
-            largest_errors=tuple(largest_errors),
-        )
+        results = []
+        for check in self.checks:
+            snapshot = check.specification
+            result = check.run(context)
+            if result.specification != snapshot:
+                raise ValueError("diagnostic result must match its configured specification")
+            results.append(result)
+        return RobustnessResult(tuple(results), identity=experiment.identity)

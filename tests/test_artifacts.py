@@ -7,14 +7,17 @@ import pytest
 
 from rvol.composition import standard_experiment_definition
 from rvol.domain import (
+    ComparisonOutcome,
     ComponentSpecification,
     EveryNSessions,
     ExecutionMetadata,
     ExecutionSpecification,
     ExperimentConfig,
     RollingWindow,
+    RunIdentity,
     WalkForwardSettings,
 )
+from rvol.evaluation import ForecastEvaluator
 from rvol.features.forecasting import HARFeatureBuilder
 from rvol.models import EWMAForecaster, HARForecaster
 from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
@@ -61,7 +64,7 @@ def test_artifacts_record_nondefault_settings_and_remain_deterministic(tmp_path,
     first = {path.name: path.read_bytes() for path in paths.all()}
     metadata = json.loads(paths.experiment.read_text())
 
-    assert metadata["schema_version"] == 4
+    assert metadata["schema_version"] == 6
     assert experiment.execution is not None
     assert metadata["execution"] == {
         "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",
@@ -219,3 +222,40 @@ def test_writer_exports_independent_executor_metadata_without_walk_forward_rules
     assert exported["settings"]["parameters"] == {"batches": 2}
     assert exported["policies"] == {}
     assert exported["facts"] == {"completed_batches": 2}
+
+
+def test_writer_exports_an_independent_comparison_test(tmp_path, configured_run):
+    experiment, _, config, specification, snapshot = configured_run
+
+    class CustomTest:
+        specification = ComponentSpecification(
+            "custom", "test.CustomTest", parameters=(("alpha", 0.1),),
+        )
+
+        def compare(self, baseline_loss, candidate_loss):
+            return ComparisonOutcome(7.0, 0.1, parameters=(("draws", 100),))
+
+    evaluation = ForecastEvaluator(
+        comparison_pairs=(("EWMA", "HAR"),), comparison_test=CustomTest(),
+    ).evaluate(experiment)
+    paths = ForecastArtifactWriter(tmp_path / "custom_test").write(
+        experiment, evaluation, config=config, dataset=snapshot, specification=specification,
+    )
+    metadata = json.loads(paths.experiment.read_text())
+    comparisons = pd.read_csv(paths.comparisons)
+    assert metadata["evaluation"]["comparison_test"]["parameters"] == {"alpha": 0.1}
+    assert "hac_lags" not in metadata["evaluation"]
+    assert set(comparisons["test_name"]) == {"custom"}
+    assert set(comparisons["statistic"]) == {7.0}
+    assert [json.loads(value) for value in comparisons["test_parameters"]] == [{"draws": 100}] * 2
+
+
+def test_writer_rejects_evaluation_for_another_run_before_writing(tmp_path, configured_run):
+    experiment, evaluation, config, specification, snapshot = configured_run
+    output = tmp_path / "wrong_identity"
+    wrong = replace(evaluation, identity=RunIdentity("another_run"))
+    with pytest.raises(ValueError, match="evaluation identity must match"):
+        ForecastArtifactWriter(output).write(
+            experiment, wrong, config=config, dataset=snapshot, specification=specification,
+        )
+    assert not output.exists()

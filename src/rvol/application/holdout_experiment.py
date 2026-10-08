@@ -66,7 +66,9 @@ class HoldoutExperiment:
             and (self.config.forecast_end is None or target.date() <= self.config.forecast_end)
         ]
         if not positions:
-            return ExperimentResult(config=self.config, execution=execution)
+            return ExperimentResult(
+                config=self.config, execution=execution, identity=self.config.identity,
+            )
 
         training = frame.iloc[:n_train]
         fitted_models = {
@@ -108,4 +110,7 @@ class HoldoutExperiment:
                     predicted_log_rv=float(prediction[0]), fit_date=settings.train_end,
                     train_start_date=train_start, train_end_date=train_end,
                 ))
-        return ExperimentResult(records=tuple(records), config=self.config, execution=execution)
+        return ExperimentResult(
+            records=tuple(records), config=self.config, execution=execution,
+            identity=self.config.identity,
+        )

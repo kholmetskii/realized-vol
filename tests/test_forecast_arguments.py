@@ -10,6 +10,7 @@ from rvol.domain import (
     ExperimentConfig,
     HoldoutSettings,
     RollingWindow,
+    RunIdentity,
     WalkForwardSettings,
 )
 
@@ -52,6 +53,12 @@ def test_each_executor_uses_its_own_default_settings():
     assert run.config == ExperimentConfig(execution=WalkForwardSettings())
 
 
+def test_run_and_fold_identities_are_configurable_in_shared_arguments():
+    assert parse_config(["--run-id", "study", "--fold-id", "2024"]).identity == RunIdentity(
+        "study", "2024",
+    )
+
+
 def test_expanding_history_can_refit_less_frequently():
     config = parse_config(["--min-train-size", "20", "--retrain-every", "5"])
 
@@ -88,6 +95,8 @@ def test_observation_counts_and_refit_intervals_require_positive_integers(option
     [
         (["--training-window", "unknown"], "invalid choice"),
         (["--executor", "unknown"], "invalid choice"),
+        (["--run-id", ""], "run_id must be a non-empty"),
+        (["--fold-id", ""], "fold_id must be a non-empty"),
         (["--executor", "holdout"], "--train-end is required"),
         (["--train-end", "2024-12-31"], "--train-end requires --executor holdout"),
         (["--update-observations"], "--update-observations requires --executor holdout"),

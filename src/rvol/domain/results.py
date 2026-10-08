@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from rvol.domain.config import ExperimentConfig
+from rvol.domain.identity import RunIdentity
 from rvol.domain.specifications import ExecutionMetadata
 
 
@@ -74,6 +75,11 @@ class ExperimentResult:
     records: tuple[ForecastRecord, ...] = ()
     config: ExperimentConfig[object] | None = None
     execution: ExecutionMetadata | None = None
+    identity: RunIdentity = field(default_factory=RunIdentity)
+
+    def __post_init__(self) -> None:
+        if self.config is not None and self.config.identity != self.identity:
+            raise ValueError("experiment identity must match its run configuration")
 
     @property
     def models(self) -> tuple[str, ...]:

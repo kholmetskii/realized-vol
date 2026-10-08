@@ -8,6 +8,36 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.stats import norm
 
+from rvol.domain import ComparisonOutcome, ComponentSpecification
+from rvol.domain.contracts import FloatArray
+
+
+@dataclass(frozen=True)
+class DieboldMarianoTest:
+    """Configured adapter around the existing one-sided Newey-West DM test."""
+
+    hac_lags: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.hac_lags is not None and (
+            isinstance(self.hac_lags, bool)
+            or not isinstance(self.hac_lags, int)
+            or self.hac_lags < 0
+        ):
+            raise ValueError("hac_lags must be a non-negative integer or None")
+
+    @property
+    def specification(self) -> ComponentSpecification:
+        return ComponentSpecification(
+            "DM", f"{type(self).__module__}.{type(self).__qualname__}",
+            parameters=(("hac_lags", self.hac_lags), ("alternative", "candidate_lower_loss")),
+        )
+
+    def compare(self, baseline_loss: FloatArray, candidate_loss: FloatArray) -> ComparisonOutcome:
+        result = diebold_mariano(baseline_loss, candidate_loss, hac_lags=self.hac_lags)
+        return ComparisonOutcome(
+            result.statistic, result.p_value, parameters=(("hac_lags", result.hac_lags),),
+        )
 
 @dataclass(frozen=True)
 class DieboldMarianoResult:

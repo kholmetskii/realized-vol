@@ -45,6 +45,8 @@ def plot_forecast_evaluation(
     """Plot forecast paths, mean losses, and cumulative candidate advantage."""
     if not experiment.records:
         raise ValueError("experiment must contain forecast records")
+    if experiment.identity != evaluation.identity:
+        raise ValueError("evaluation identity must match the plotted experiment")
 
     records_by_model = defaultdict(list)
     for record in experiment.records:

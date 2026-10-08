@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Generic, TypeVar
+
+from rvol.domain.identity import RunIdentity
 
 Settings = TypeVar("Settings", covariant=True)
 
@@ -16,6 +18,7 @@ class ExperimentConfig(Generic[Settings]):
     execution: Settings
     forecast_start: date | None = None
     forecast_end: date | None = None
+    identity: RunIdentity = field(default_factory=RunIdentity)
 
     def __post_init__(self) -> None:
         if (

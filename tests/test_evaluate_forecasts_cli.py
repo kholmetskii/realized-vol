@@ -19,6 +19,7 @@ from rvol.domain import (
     ExperimentResult,
     HoldoutSettings,
     RollingWindow,
+    RunIdentity,
     WalkForwardSettings,
 )
 from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter, RobustnessArtifactWriter
@@ -96,7 +97,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
     assert "naive            HAR" in completed.stdout
     if comparison_pairs is not None:
         assert "AR1              HAR" in completed.stdout
-    assert "Newey-West lags: 2" in completed.stdout
+    assert "comparison test: DM; parameters: {'hac_lags': 2}" in completed.stdout
 
     artifact_names = (
         "forecasts.csv",
@@ -125,11 +126,13 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
         "fit_date",
         "train_start_date",
         "train_end_date",
+        "run_id",
+        "fold_id",
     ]
     assert len(forecasts) == 30
     assert len(summaries) == 10
     assert len(comparisons) == 2 * len(expected_pairs)
-    assert metadata["schema_version"] == 4
+    assert metadata["schema_version"] == 6
     assert metadata["execution"] == {
         "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",
         "settings": {
@@ -190,7 +193,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
     assert models["HAR"]["feature_names"] == ["rv_daily", "rv_weekly", "rv_monthly"]
     assert models["AR1"]["feature_names"] == models["naive"]["feature_names"] == ["rv_daily"]
     assert models["historical_mean"]["feature_names"] == models["EWMA"]["feature_names"] == []
-    assert metadata["evaluation"]["hac_lags"] == 2
+    assert metadata["evaluation"]["comparison_test"]["parameters"]["hac_lags"] == 2
     assert metadata["evaluation"]["comparison_pairs"] == [
         {"baseline": baseline, "candidate": candidate}
         for baseline, candidate in expected_pairs
@@ -384,12 +387,14 @@ def test_all_forecast_commands_use_holdout_results_from_the_python_api(
     definition = standard_experiment_definition(executor_factory=HoldoutExperiment)
     config = ExperimentConfig(
         execution=HoldoutSettings(date(2022, 3, 4), 20, update),
+        identity=RunIdentity("holdout_check", "fold_1"),
         forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
     )
     expected = definition.run(daily, config)
     output = tmp_path / "holdout"
     args = [
         module, str(source), "--executor", "holdout", "--train-end", "2022-03-04",
+        "--run-id", "holdout_check", "--fold-id", "fold_1",
         "--min-train-size", "20", "--forecast-start", "2022-03-14",
         "--forecast-end", "2022-03-21", *(["--update-observations"] if update else []),
     ]
@@ -428,3 +433,36 @@ def test_all_forecast_commands_use_holdout_results_from_the_python_api(
     assert {p.name: p.read_bytes() for p in paths} == {
         p.name: (output / p.name).read_bytes() for p in paths
     }
+
+
+def test_robustness_command_runs_only_selected_checks_on_a_short_report(
+    tmp_path, daily_dataset, monkeypatch,
+):
+    from rvol.cli import robustness_report
+
+    source, _ = daily_dataset
+    output = tmp_path / "monthly"
+    monkeypatch.setattr(sys, "argv", [
+        "robustness_report", str(source), "--min-train-size", "20",
+        "--forecast-start", "2022-03-14", "--forecast-end", "2022-03-14",
+        "--check", "monthly_losses", "--output-dir", str(output),
+    ])
+    robustness_report.main()
+
+    assert {path.name for path in output.iterdir()} == {
+        "monthly_losses.csv", "robustness.md", "robustness.json",
+    }
+    metadata = json.loads((output / "robustness.json").read_text())
+    assert [item["specification"]["name"] for item in metadata["checks"]] == ["monthly_losses"]
+
+
+def test_robustness_command_rejects_duplicate_checks_before_loading_data(monkeypatch, capsys):
+    from rvol.cli import robustness_report
+
+    monkeypatch.setattr(sys, "argv", [
+        "robustness_report", "missing.parquet", "--check", "win_rates", "--check", "win_rates",
+    ])
+    with pytest.raises(SystemExit) as error:
+        robustness_report.main()
+    assert error.value.code == 2
+    assert "unique" in capsys.readouterr().err

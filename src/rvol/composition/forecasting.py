@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Generic, TypeVar, overload
 
 import pandas as pd
@@ -19,12 +19,18 @@ from rvol.domain import (
     HoldoutSettings,
     WalkForwardSettings,
 )
-from rvol.domain.contracts import ForecastMetric
+from rvol.domain.contracts import ForecastComparisonTest, ForecastMetric
 from rvol.evaluation import (
+    DiagnosticCheck,
+    DieboldMarianoTest,
     ForecastEvaluator,
     ForecastRobustnessAnalyzer,
+    LagSensitivityCheck,
+    LargestErrorsCheck,
     LogMSEMetric,
+    MonthlyLossCheck,
     QLikeMetric,
+    WinRateCheck,
 )
 from rvol.features.forecasting import HARFeatureBuilder
 from rvol.models import (
@@ -36,6 +42,25 @@ from rvol.models import (
 )
 
 Settings = TypeVar("Settings")
+ROBUSTNESS_CHECK_NAMES = ("hac_sensitivity", "win_rates", "monthly_losses", "largest_errors")
+
+
+def standard_diagnostic_checks(
+    names: Sequence[str] | None = None, *,
+    hac_lags: Sequence[int] = tuple(range(6)), top_errors: int = 5,
+) -> tuple[DiagnosticCheck, ...]:
+    selected = ROBUSTNESS_CHECK_NAMES if names is None else tuple(names)
+    if not selected or len(set(selected)) != len(selected):
+        raise ValueError("diagnostic check names must be non-empty and unique")
+    factories: dict[str, Callable[[], DiagnosticCheck]] = {
+        "hac_sensitivity": lambda: LagSensitivityCheck(tuple(hac_lags)),
+        "win_rates": WinRateCheck,
+        "monthly_losses": MonthlyLossCheck,
+        "largest_errors": lambda: LargestErrorsCheck(top_errors),
+    }
+    if set(selected).difference(factories):
+        raise ValueError("unknown diagnostic check")
+    return tuple(factories[name]() for name in selected)
 
 
 @dataclass(frozen=True)
@@ -49,6 +74,7 @@ class ExperimentDefinition(Generic[Settings]):
     comparison_pairs: tuple[tuple[str, str], ...]
     candidate_model: str
     baseline_models: tuple[str, ...]
+    comparison_test: ForecastComparisonTest = field(default_factory=DieboldMarianoTest)
 
     def __post_init__(self) -> None:
         names = [model.name for model in self.models]
@@ -93,27 +119,42 @@ class ExperimentDefinition(Generic[Settings]):
         hac_lags: int | None = None,
     ) -> ForecastEvaluator:
         """Build an evaluator with defaults or explicit comparison overrides."""
+        test = self.comparison_test
+        if hac_lags is not None:
+            if not isinstance(test, DieboldMarianoTest):
+                raise ValueError(
+                    "hac_lags requires a DieboldMarianoTest; configure your test directly"
+                )
+            test = replace(test, hac_lags=hac_lags)
         return ForecastEvaluator(
             metrics=self.metrics,
             comparison_pairs=(
                 self.comparison_pairs if comparison_pairs is None else comparison_pairs
             ),
-            hac_lags=hac_lags,
+            comparison_test=test,
         )
 
     def robustness_analyzer(
         self,
         *,
-        hac_lags: Sequence[int] = tuple(range(6)),
-        top_errors: int = 5,
+        hac_lags: Sequence[int] | None = None,
+        top_errors: int | None = None,
+        checks: Sequence[DiagnosticCheck] | None = None,
     ) -> ForecastRobustnessAnalyzer:
         """Build robustness checks for the configured candidate and baselines."""
+        if checks is not None and (hac_lags is not None or top_errors is not None):
+            raise ValueError("configure settings on the injected diagnostic checks")
         return ForecastRobustnessAnalyzer(
+            checks=(
+                standard_diagnostic_checks(
+                    hac_lags=tuple(range(6)) if hac_lags is None else hac_lags,
+                    top_errors=5 if top_errors is None else top_errors,
+                )
+                if checks is None else checks
+            ),
             candidate_model=self.candidate_model,
             baseline_models=self.baseline_models,
             metrics=self.metrics,
-            hac_lags=hac_lags,
-            top_errors=top_errors,
         )
 
 

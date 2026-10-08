@@ -1,5 +1,6 @@
 """Stable domain contracts and value objects for volatility research."""
 
+from rvol.domain.comparisons import ComparisonOutcome
 from rvol.domain.config import ExperimentConfig
 from rvol.domain.contracts import (
     DatasetRepository,
@@ -8,12 +9,14 @@ from rvol.domain.contracts import (
     ExperimentExecutorFactory,
     FeatureBuilder,
     FittedForecaster,
+    ForecastComparisonTest,
     Forecaster,
     ForecastMetric,
     RefitSchedule,
     TrainingWindowPolicy,
     UpdatablePredictor,
 )
+from rvol.domain.identity import RunIdentity
 from rvol.domain.policies import (
     EveryNSessions,
     ExpandingWindow,
@@ -30,6 +33,7 @@ from rvol.domain.specifications import (
 
 __all__ = [
     "ComponentSpecification",
+    "ComparisonOutcome",
     "DatasetRepository",
     "DescribedExecutionSettings",
     "EveryNSessions",
@@ -44,11 +48,13 @@ __all__ = [
     "FeatureBuilder",
     "FittedForecaster",
     "Forecaster",
+    "ForecastComparisonTest",
     "ForecastMetric",
     "ForecastRecord",
     "HoldoutSettings",
     "RefitSchedule",
     "RollingWindow",
+    "RunIdentity",
     "TrainingWindowPolicy",
     "UpdatablePredictor",
     "WalkForwardSettings",

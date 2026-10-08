@@ -102,7 +102,7 @@ class WalkForwardExperiment:
         ), None)
         if first_output is None:
             return ExperimentResult(
-                config=self.config, execution=execution,
+                config=self.config, execution=execution, identity=self.config.identity,
             )
 
         # Earlier fits are superseded by the last scheduled fit before output.
@@ -172,4 +172,5 @@ class WalkForwardExperiment:
 
         return ExperimentResult(
             records=tuple(records), config=self.config, execution=execution,
+            identity=self.config.identity,
         )

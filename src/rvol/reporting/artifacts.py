@@ -100,6 +100,8 @@ class ForecastArtifactWriter:
             raise ValueError("model specifications must match the forecast models")
         if experiment.config != config:
             raise ValueError("artifact configuration must match the completed experiment")
+        if experiment.identity != evaluation.identity:
+            raise ValueError("evaluation identity must match the completed experiment")
         execution = experiment.execution
         if execution is None:
             raise ValueError("experiment must include execution metadata")
@@ -107,6 +109,8 @@ class ForecastArtifactWriter:
             raise ValueError("execution specification must match the completed experiment")
         if any(record.fit_date is None for record in experiment.records):
             raise ValueError("forecast records must include fit dates and training boundaries")
+        if evaluation.comparisons and evaluation.comparison_test is None:
+            raise ValueError("comparisons must include their test specification")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         paths = ForecastArtifactPaths(
             forecasts=self.output_dir / "forecasts.csv",
@@ -129,17 +133,24 @@ class ForecastArtifactWriter:
                     "fit_date": record.fit_date,
                     "train_start_date": record.train_start_date,
                     "train_end_date": record.train_end_date,
+                    "run_id": experiment.identity.run_id,
+                    "fold_id": experiment.identity.fold_id,
                 }
                 for record in experiment.records
             ),
             key=lambda row: (row["target_date"], row["model"]),
         )
         summary_rows = sorted(
-            (asdict(summary) for summary in evaluation.summaries),
+            (asdict(summary) | asdict(evaluation.identity) for summary in evaluation.summaries),
             key=lambda row: (row["metric"], row["model"]),
         )
         comparison_rows = sorted(
-            (asdict(comparison) for comparison in evaluation.comparisons),
+            (
+                asdict(comparison) | asdict(evaluation.identity) | {"test_parameters": json.dumps(
+                    dict(comparison.test_parameters), sort_keys=True,
+                )}
+                for comparison in evaluation.comparisons
+            ),
             key=lambda row: (row["metric"], row["baseline_model"], row["candidate_model"]),
         )
 
@@ -155,8 +166,10 @@ class ForecastArtifactWriter:
             "fit_date",
             "train_start_date",
             "train_end_date",
+            "run_id",
+            "fold_id",
         ]
-        summary_columns = ["model", "metric", "n_obs", "mean_loss"]
+        summary_columns = ["model", "metric", "n_obs", "mean_loss", "run_id", "fold_id"]
         comparison_columns = [
             "metric",
             "baseline_model",
@@ -165,9 +178,12 @@ class ForecastArtifactWriter:
             "baseline_mean_loss",
             "candidate_mean_loss",
             "mean_loss_difference",
-            "dm_statistic",
+            "test_name",
+            "statistic",
             "p_value",
-            "hac_lags",
+            "test_parameters",
+            "run_id",
+            "fold_id",
         ]
         atomic_csv(pd.DataFrame(forecast_rows, columns=forecast_columns), paths.forecasts)
         atomic_csv(pd.DataFrame(summary_rows, columns=summary_columns), paths.loss_summary)
@@ -182,11 +198,9 @@ class ForecastArtifactWriter:
             (item.baseline_model, item.candidate_model)
             for item in evaluation.comparisons
         ))
-        hac_lags = sorted({item.hac_lags for item in evaluation.comparisons})
-        if len(hac_lags) > 1:
-            raise ValueError("comparisons must use one common HAC lag setting")
         payload = {
-            "schema_version": 4,
+            "schema_version": 6,
+            "identity": asdict(experiment.identity),
             "execution": {
                 "executor": execution.executor,
                 "settings": _component_payload(execution.settings.component),
@@ -228,7 +242,10 @@ class ForecastArtifactWriter:
                     {"baseline": baseline, "candidate": candidate}
                     for baseline, candidate in comparison_pairs
                 ],
-                "hac_lags": None if not hac_lags else hac_lags[0],
+                "comparison_test": (
+                    None if evaluation.comparison_test is None
+                    else _component_payload(evaluation.comparison_test)
+                ),
             },
         }
         atomic_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", paths.experiment)

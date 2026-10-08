@@ -1,5 +1,8 @@
 import numpy as np
+import pytest
 
+from rvol.domain import ComparisonOutcome
+from rvol.evaluation import DieboldMarianoTest
 from rvol.evaluation.comparison import diebold_mariano
 
 
@@ -40,3 +43,23 @@ def test_zero_lag_statistic_matches_the_iid_formula():
     result = diebold_mariano(baseline, candidate, hac_lags=0)
 
     assert np.isclose(result.statistic, expected)
+
+
+def test_configured_dm_adapter_preserves_the_existing_formula_and_records_resolved_lags():
+    baseline = np.linspace(0.1, 1.0, 20)
+    candidate = baseline / 2
+    test = DieboldMarianoTest()
+    reference = diebold_mariano(baseline, candidate)
+
+    outcome = test.compare(baseline, candidate)
+
+    assert outcome.statistic == reference.statistic
+    assert outcome.p_value == reference.p_value
+    assert dict(outcome.parameters) == {"hac_lags": reference.hac_lags}
+    assert dict(test.specification.parameters)["hac_lags"] is None
+
+
+@pytest.mark.parametrize("statistic, p_value", [(float("nan"), 0.5), (0, -0.1), (0, 1.1)])
+def test_comparison_outcomes_reject_invalid_values(statistic, p_value):
+    with pytest.raises(ValueError):
+        ComparisonOutcome(statistic, p_value)

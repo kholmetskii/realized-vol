@@ -16,6 +16,7 @@ from rvol.domain import (
     ExperimentConfig,
     HoldoutSettings,
     RollingWindow,
+    RunIdentity,
     WalkForwardSettings,
 )
 
@@ -47,6 +48,8 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--forecast-start", type=iso_date, help="first target date to evaluate")
     parser.add_argument("--forecast-end", type=iso_date, help="last target date to evaluate")
+    parser.add_argument("--run-id", default="default", help="identity of this experiment run")
+    parser.add_argument("--fold-id", help="optional validation fold identity")
     parser.add_argument(
         "--executor", choices=("walk-forward", "holdout"), default="walk-forward",
         help="experiment execution method (default: %(default)s)",
@@ -82,6 +85,7 @@ def experiment_run_from_args(
 ) -> ExperimentRun[WalkForwardSettings] | ExperimentRun[HoldoutSettings]:
     """Bind executor and typed settings; reject incompatible options before I/O."""
     try:
+        identity = RunIdentity(args.run_id, args.fold_id)
         if args.executor == "holdout":
             for option in ("training_window", "window_size", "retrain_every"):
                 if getattr(args, option) is not None:
@@ -101,6 +105,7 @@ def experiment_run_from_args(
                 config=ExperimentConfig(
                     execution=holdout, forecast_start=args.forecast_start,
                     forecast_end=args.forecast_end,
+                    identity=identity,
                 ),
             )
         if args.train_end is not None:
@@ -129,6 +134,7 @@ def experiment_run_from_args(
             config=ExperimentConfig(
                 execution=walk_forward, forecast_start=args.forecast_start,
                 forecast_end=args.forecast_end,
+                identity=identity,
             ),
         )
     except ValueError as error:

@@ -82,8 +82,8 @@ def test_standard_definition_preserves_each_workflows_comparison_choices():
     assert [
         (item.baseline_model, item.candidate_model) for item in evaluation.comparisons
     ] == [("naive", "HAR"), ("naive", "HAR")]
-    assert [item.baseline_model for item in robustness.win_rates[:4]] == [
-        "naive", "EWMA", "AR1", "historical_mean",
+    assert [item["baseline_model"] for item in robustness.check("win_rates").records()[:4]] == [
+        "AR1", "EWMA", "historical_mean", "naive",
     ]
 
 
@@ -137,9 +137,9 @@ def test_definition_supports_other_feature_builders_models_metrics_and_candidate
     assert experiment.models == ("historical_mean", "naive")
     assert experiment.n_forecasts == 8
     assert {item.metric for item in evaluation.summaries} == {"log-RV MSE"}
-    assert len(evaluation.comparisons) == len(robustness.hac_comparisons) == 1
+    assert len(evaluation.comparisons) == len(robustness.check("hac_sensitivity").rows) == 1
     assert evaluation.comparisons[0].candidate_model == "naive"
-    assert robustness.win_rates[0].candidate_model == "naive"
+    assert robustness.check("win_rates").records()[0]["candidate_model"] == "naive"
     assert definition.all_comparison_pairs == (("historical_mean", "naive"),)
     assert definition.specification.features.name == "daily"
 

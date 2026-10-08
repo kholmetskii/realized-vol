@@ -97,13 +97,13 @@ def test_statistical_comparison_matches_current_pipeline(characterized_pipeline)
 
     qlike = by_metric["QLIKE"]
     assert qlike.n_obs == 43
-    assert qlike.hac_lags == 3
+    assert dict(qlike.test_parameters)["hac_lags"] == 3
     np.testing.assert_allclose(
         [
             qlike.baseline_mean_loss,
             qlike.candidate_mean_loss,
             qlike.mean_loss_difference,
-            qlike.dm_statistic,
+            qlike.statistic,
             qlike.p_value,
         ],
         [
@@ -119,13 +119,13 @@ def test_statistical_comparison_matches_current_pipeline(characterized_pipeline)
 
     log_mse = by_metric["log-RV MSE"]
     assert log_mse.n_obs == 43
-    assert log_mse.hac_lags == 3
+    assert dict(log_mse.test_parameters)["hac_lags"] == 3
     np.testing.assert_allclose(
         [
             log_mse.baseline_mean_loss,
             log_mse.candidate_mean_loss,
             log_mse.mean_loss_difference,
-            log_mse.dm_statistic,
+            log_mse.statistic,
             log_mse.p_value,
         ],
         [

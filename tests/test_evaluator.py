@@ -7,7 +7,14 @@ import pandas as pd
 import pytest
 
 from rvol.application import WalkForwardExperiment
-from rvol.domain import ExperimentConfig, ExperimentResult, WalkForwardSettings
+from rvol.domain import (
+    ComparisonOutcome,
+    ComponentSpecification,
+    ExperimentConfig,
+    ExperimentResult,
+    ForecastComparisonTest,
+    WalkForwardSettings,
+)
 from rvol.evaluation import ForecastEvaluator, ModelLossSummary
 from rvol.models import (
     AR1Forecaster,
@@ -77,7 +84,7 @@ def test_evaluator_calculates_both_metrics_for_every_model():
         assert comparison.candidate_mean_loss < comparison.baseline_mean_loss
         assert comparison.mean_loss_difference > 0
         assert comparison.p_value < 0.01
-        assert comparison.hac_lags == 3
+        assert dict(comparison.test_parameters)["hac_lags"] == 3
 
 
 def test_evaluator_supports_additional_pairwise_comparisons():
@@ -140,6 +147,45 @@ def test_evaluator_rejects_misaligned_models_and_unknown_comparison_names():
 def test_evaluator_rejects_an_explicitly_empty_metric_collection():
     with pytest.raises(ValueError, match="at least one"):
         ForecastEvaluator(metrics=())
+
+
+def test_evaluator_uses_an_independent_comparison_test_and_preserves_loss_vectors():
+    class CustomTest:
+        specification = ComponentSpecification(
+            "custom", "test.CustomTest", parameters=(("replications", 17),),
+        )
+
+        def __init__(self):
+            self.inputs: list[tuple[np.ndarray, np.ndarray]] = []
+
+        def compare(self, baseline_loss, candidate_loss):
+            self.inputs.append((baseline_loss.copy(), candidate_loss.copy()))
+            baseline_loss[:] = 0  # A third-party implementation cannot corrupt saved losses.
+            return ComparisonOutcome(12.0, 0.2, (("replications", 17),))
+
+    test = CustomTest()
+    assert isinstance(test, ForecastComparisonTest)
+    evaluator = ForecastEvaluator(comparison_pairs=(("naive", "HAR"),), comparison_test=test)
+    result = evaluator.evaluate(experiment_result())
+    reference = ForecastEvaluator().evaluate(experiment_result())
+
+    assert result.losses == reference.losses
+    assert result.summaries == reference.summaries
+    assert result.comparison_test == test.specification
+    assert len(test.inputs) == 2
+    for comparison, (baseline, candidate) in zip(result.comparisons, test.inputs, strict=True):
+        assert comparison.test_name == "custom"
+        assert comparison.statistic == 12.0
+        assert comparison.p_value == 0.2
+        assert dict(comparison.test_parameters) == {"replications": 17}
+        assert comparison.mean_loss_difference == np.mean(baseline - candidate)
+
+
+def test_injected_test_cannot_silently_ignore_a_hac_override():
+    from rvol.evaluation import DieboldMarianoTest
+
+    with pytest.raises(ValueError, match="configure hac_lags on the injected"):
+        ForecastEvaluator(comparison_test=DieboldMarianoTest(), hac_lags=2)
 
 
 @pytest.mark.parametrize(

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, Self, TypeAlias, TypeVar, r
 import numpy as np
 from numpy.typing import NDArray
 
+from rvol.domain.comparisons import ComparisonOutcome
 from rvol.domain.specifications import ComponentSpecification, ExecutionSpecification
 
 if TYPE_CHECKING:
@@ -153,6 +154,22 @@ class ForecastMetric(Protocol):
     def scale(self) -> ForecastScale: ...
 
     def losses(self, actual: FloatArray, predicted: FloatArray) -> FloatArray: ...
+
+
+@runtime_checkable
+class ForecastComparisonTest(Protocol):
+    """Test whether the candidate's expected loss is lower on aligned targets.
+
+    Inputs are finite, chronological loss vectors of equal length. Implementors
+    validate their sample requirements and preserve both input arrays.
+    """
+
+    @property
+    def specification(self) -> ComponentSpecification: ...
+
+    def compare(
+        self, baseline_loss: FloatArray, candidate_loss: FloatArray,
+    ) -> ComparisonOutcome: ...
 
 
 @runtime_checkable

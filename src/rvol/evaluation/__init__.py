@@ -1,5 +1,7 @@
 """Forecast evaluation and model comparison."""
 
+from rvol.evaluation.comparison import DieboldMarianoTest
+from rvol.evaluation.diagnostics import DiagnosticCheck, DiagnosticContext, DiagnosticResult
 from rvol.evaluation.evaluator import (
     EvaluationResult,
     ForecastEvaluator,
@@ -9,24 +11,33 @@ from rvol.evaluation.evaluator import (
 )
 from rvol.evaluation.metrics import LogMSEMetric, QLikeMetric
 from rvol.evaluation.robustness import (
-    ForecastErrorRecord,
     ForecastRobustnessAnalyzer,
-    MonthlyLossSummary,
+    LagSensitivityCheck,
+    LargestErrorsCheck,
+    MonthlyLossCheck,
     RobustnessResult,
-    WinRateSummary,
+    WinRateCheck,
 )
+from rvol.evaluation.validation import AggregateLossSummary, ValidationResult
 
 __all__ = [
+    "AggregateLossSummary",
+    "DieboldMarianoTest",
+    "DiagnosticCheck",
+    "DiagnosticContext",
+    "DiagnosticResult",
     "EvaluationResult",
     "ForecastEvaluator",
-    "ForecastErrorRecord",
     "ForecastRobustnessAnalyzer",
     "LogMSEMetric",
     "LossRecord",
     "ModelLossSummary",
     "PairwiseComparison",
     "QLikeMetric",
-    "MonthlyLossSummary",
+    "LagSensitivityCheck",
+    "LargestErrorsCheck",
+    "MonthlyLossCheck",
     "RobustnessResult",
-    "WinRateSummary",
+    "WinRateCheck",
+    "ValidationResult",
 ]

@@ -53,9 +53,12 @@ def main() -> None:
         )
 
     print("\npairwise alternative: candidate has lower expected loss than baseline\n")
+    test_name = (
+        "statistic" if evaluation.comparison_test is None else evaluation.comparison_test.name
+    )
     print(
         f"{'metric':<12} {'baseline':<16} {'candidate':<12} "
-        f"{'difference':>12} {'DM':>9} {'p':>9}"
+        f"{'difference':>12} {test_name:>9} {'p':>9}"
     )
     for comparison in evaluation.comparisons:
         print(
@@ -63,11 +66,12 @@ def main() -> None:
             f"{comparison.baseline_model:<16} "
             f"{comparison.candidate_model:<12} "
             f"{comparison.mean_loss_difference:>12.6g} "
-            f"{comparison.dm_statistic:>9.3f} "
+            f"{comparison.statistic:>9.3f} "
             f"{comparison.p_value:>9.4f}"
         )
     if evaluation.comparisons:
-        print(f"\nNewey-West lags: {evaluation.comparisons[0].hac_lags}")
+        parameters = dict(evaluation.comparisons[0].test_parameters)
+        print(f"\ncomparison test: {test_name}; parameters: {parameters}")
     if args.output_dir:
         snapshot = DatasetSnapshot.from_frame(args.daily, daily)
         artifact_paths = ForecastArtifactWriter(args.output_dir).write(

@@ -4,15 +4,21 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from rvol.domain.contracts import ForecastMetric
+from rvol.domain.contracts import ForecastComparisonTest, ForecastMetric
+from rvol.domain.identity import RunIdentity
 from rvol.domain.results import ExperimentResult, ForecastRecord
-from rvol.evaluation.comparison import diebold_mariano
+from rvol.domain.specifications import ComponentSpecification, ParameterValue
+from rvol.evaluation.comparison import DieboldMarianoTest
 from rvol.evaluation.metrics import LogMSEMetric, QLikeMetric
+
+if TYPE_CHECKING:
+    from rvol.evaluation.validation import LossAggregation, ValidationResult
 
 
 @dataclass(frozen=True)
@@ -56,9 +62,10 @@ class PairwiseComparison:
     baseline_mean_loss: float
     candidate_mean_loss: float
     mean_loss_difference: float
-    dm_statistic: float
+    test_name: str
+    statistic: float
     p_value: float
-    hac_lags: int
+    test_parameters: tuple[tuple[str, ParameterValue], ...]
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,8 @@ class EvaluationResult:
     losses: tuple[LossRecord, ...]
     summaries: tuple[ModelLossSummary, ...]
     comparisons: tuple[PairwiseComparison, ...]
+    comparison_test: ComponentSpecification | None = None
+    identity: RunIdentity = field(default_factory=RunIdentity)
 
 
 class ForecastEvaluator:
@@ -79,6 +88,7 @@ class ForecastEvaluator:
         *,
         comparison_pairs: Sequence[tuple[str, str]] = (),
         hac_lags: int | None = None,
+        comparison_test: ForecastComparisonTest | None = None,
     ) -> None:
         selected_metrics = (
             (QLikeMetric(), LogMSEMetric())
@@ -97,7 +107,20 @@ class ForecastEvaluator:
             raise ValueError("comparison models must be different")
         self.metrics = selected_metrics
         self.comparison_pairs = pairs
-        self.hac_lags = hac_lags
+        if comparison_test is not None and hac_lags is not None:
+            raise ValueError("configure hac_lags on the injected comparison test")
+        self.comparison_test = (
+            DieboldMarianoTest(hac_lags) if comparison_test is None else comparison_test
+        )
+
+    def evaluate_runs(
+        self, experiments: Sequence[ExperimentResult], *,
+        aggregation: LossAggregation = "equal_run",
+    ) -> ValidationResult:
+        """Evaluate each identified run/fold independently, then aggregate losses."""
+        from rvol.evaluation.validation import evaluate_runs
+
+        return evaluate_runs(self, experiments, aggregation=aggregation)
 
     @staticmethod
     def _aligned_records(
@@ -129,6 +152,7 @@ class ForecastEvaluator:
     def evaluate(self, experiment: ExperimentResult) -> EvaluationResult:
         """Calculate losses and requested pairwise model comparisons."""
         grouped = self._aligned_records(experiment)
+        test_specification = self.comparison_test.specification
         model_names = set(grouped)
         for baseline, candidate in self.comparison_pairs:
             missing = {baseline, candidate}.difference(model_names)
@@ -170,26 +194,25 @@ class ForecastEvaluator:
             for baseline, candidate in self.comparison_pairs:
                 baseline_loss = losses_by_key[(metric.name, baseline)]
                 candidate_loss = losses_by_key[(metric.name, candidate)]
-                test = diebold_mariano(
-                    baseline_loss,
-                    candidate_loss,
-                    hac_lags=self.hac_lags,
-                )
+                test = self.comparison_test.compare(baseline_loss.copy(), candidate_loss.copy())
                 comparisons.append(PairwiseComparison(
                     metric=metric.name,
                     baseline_model=baseline,
                     candidate_model=candidate,
-                    n_obs=test.n_obs,
+                    n_obs=len(baseline_loss),
                     baseline_mean_loss=float(np.mean(baseline_loss)),
                     candidate_mean_loss=float(np.mean(candidate_loss)),
-                    mean_loss_difference=test.mean_loss_difference,
-                    dm_statistic=test.statistic,
+                    mean_loss_difference=float(np.mean(baseline_loss - candidate_loss)),
+                    test_name=test_specification.name,
+                    statistic=test.statistic,
                     p_value=test.p_value,
-                    hac_lags=test.hac_lags,
+                    test_parameters=test.parameters,
                 ))
 
         return EvaluationResult(
             losses=tuple(loss_records),
             summaries=tuple(summaries),
             comparisons=tuple(comparisons),
+            comparison_test=test_specification if comparisons else None,
+            identity=experiment.identity,
         )
