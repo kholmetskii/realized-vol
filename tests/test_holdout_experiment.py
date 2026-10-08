@@ -5,13 +5,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.application import HoldoutExperiment
-from rvol.composition import standard_experiment_definition
 from rvol.domain import ExperimentConfig, HoldoutSettings
 from rvol.domain.contracts import FloatArray
-from rvol.models import EWMAForecaster, HistoricalMeanForecaster, NaiveForecaster
-from rvol.models.predictors import ConstantPredictor
-from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
+from rvol.forecasting.composition import standard_experiment_definition
+from rvol.forecasting.execution import HoldoutExperiment
+from rvol.forecasting.models import EWMAForecaster, HistoricalMeanForecaster, NaiveForecaster
+from rvol.forecasting.models.predictors import ConstantPredictor
+from rvol.presentation.reporting import DatasetSnapshot, ForecastArtifactWriter
 
 
 def features_sample(n: int = 30) -> pd.DataFrame:

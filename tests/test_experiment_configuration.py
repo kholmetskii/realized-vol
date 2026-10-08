@@ -8,12 +8,12 @@ import pandas as pd
 import pytest
 
 from rvol.cli._arguments import add_forecast_arguments, experiment_run_from_args
-from rvol.composition import (
+from rvol.domain import ExperimentConfig, HoldoutSettings, TargetHorizon, WalkForwardSettings
+from rvol.forecasting.composition import (
     ExperimentRun,
     experiment_run_from_mapping,
     standard_experiment_definition,
 )
-from rvol.domain import ExperimentConfig, HoldoutSettings, TargetHorizon, WalkForwardSettings
 from rvol.infrastructure.configuration import load_experiment_configuration
 
 

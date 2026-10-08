@@ -5,42 +5,51 @@ import pytest
 
 PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[1] / "src" / "rvol"
 
+# Keep separate rules inside grouped packages: grouping must not weaken boundaries.
 PACKAGE_DEPENDENCIES = {
     "": set(),
     "domain": {"domain"},
-    "application": {"application", "domain"},
-    "cli": {
-        "cli",
-        "composition",
-        "domain",
-        "evaluation",
-        "infrastructure",
-        "plotting",
-        "reporting",
+    "forecasting": set(),
+    "forecasting.execution": {"forecasting.execution", "domain"},
+    "forecasting.models": {"forecasting.models", "domain"},
+    "forecasting.evaluation": {"forecasting.evaluation", "domain"},
+    "forecasting.features": {"domain", "data.market"},
+    "forecasting.targets": {"domain", "data.market"},
+    "forecasting.composition": {
+        "forecasting.composition", "forecasting.execution", "forecasting.models",
+        "forecasting.evaluation", "forecasting.features", "forecasting.targets", "domain",
     },
-    "composition": {
-        "application", "composition", "domain", "evaluation", "features", "models", "targets",
-    },
-    "data": {"data"},
-    "diagnostics": {"diagnostics", "features", "market"},
+    "data": {"data", "data.market", "estimators"},
+    "data.market": {"data.market"},
+    "diagnostics": {"diagnostics", "data", "data.market"},
     "estimators": {"estimators"},
-    "evaluation": {"domain", "evaluation"},
-    "features": {"domain", "estimators", "features", "market"},
-    "market": {"market"},
-    "models": {"domain", "models"},
-    "infrastructure": {"domain", "infrastructure"},
-    "plotting": {
-        "diagnostics",
-        "domain",
-        "estimators",
-        "evaluation",
-        "plotting",
-        "simulation",
-    },
-    "reporting": {"domain", "evaluation", "reporting"},
     "simulation": {"simulation"},
-    "targets": {"domain", "market", "targets"},
+    "presentation": set(),
+    "presentation.plotting": {
+        "presentation.plotting", "diagnostics", "domain", "estimators",
+        "forecasting.evaluation", "simulation",
+    },
+    "presentation.reporting": {"presentation.reporting", "forecasting.evaluation", "domain"},
+    "infrastructure": {"infrastructure", "domain"},
+    "cli": {
+        "cli", "forecasting.composition", "domain", "forecasting.evaluation",
+        "infrastructure", "presentation.plotting", "presentation.reporting",
+    },
 }
+
+
+def package_boundary(module: str) -> str:
+    matches = [
+        name for name in PACKAGE_DEPENDENCIES
+        if name and (module == name or module.startswith(name + "."))
+    ]
+    return max(matches, key=len, default="")
+
+
+def source_module(path: pathlib.Path) -> str:
+    parts = path.relative_to(PACKAGE_ROOT).with_suffix("").parts
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
 
 def rvol_dependencies(path: pathlib.Path) -> set[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
@@ -55,31 +64,34 @@ def rvol_dependencies(path: pathlib.Path) -> set[str]:
             if module == "rvol":
                 dependencies.add("")
             elif module.startswith("rvol."):
-                dependencies.add(module.split(".")[1])
+                dependencies.add(module.removeprefix("rvol."))
     return dependencies
 
 
 def test_architecture_rules_cover_every_package():
-    package_directories = {
-        path.name
-        for path in PACKAGE_ROOT.iterdir()
-        if path.is_dir() and path.name != "__pycache__"
+    packages = {source_module(path) for path in PACKAGE_ROOT.rglob("__init__.py")}
+    # The feature and target builders are single modules with their own boundaries.
+    assert set(PACKAGE_DEPENDENCIES) == packages | {
+        "forecasting.features", "forecasting.targets",
     }
-
-    assert set(PACKAGE_DEPENDENCIES).difference({""}) == package_directories
+    for name in PACKAGE_DEPENDENCIES:
+        path = PACKAGE_ROOT.joinpath(*name.split(".")) if name else PACKAGE_ROOT
+        assert (path / "__init__.py").is_file() or path.with_suffix(".py").is_file()
 
 
 @pytest.mark.parametrize("package", sorted(PACKAGE_DEPENDENCIES))
 def test_clean_architecture_dependency_direction(package: str):
     allowed = PACKAGE_DEPENDENCIES[package]
     violations: list[str] = []
-    package_root = PACKAGE_ROOT / package
-    paths = package_root.glob("*.py") if not package else package_root.rglob("*.py")
-    for path in sorted(paths):
-        relative_path = path.relative_to(package_root).as_posix()
-        forbidden = rvol_dependencies(path).difference(allowed)
+    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
+        if package_boundary(source_module(path)) != package:
+            continue
+        forbidden = {
+            dependency for dependency in rvol_dependencies(path)
+            if package_boundary(dependency) not in allowed
+        }
         if forbidden:
+            relative_path = path.relative_to(PACKAGE_ROOT).as_posix()
             violations.append(f"{relative_path}: {', '.join(sorted(forbidden))}")
-
     package_name = package or "rvol"
     assert not violations, f"{package_name} has outward dependencies: {'; '.join(violations)}"

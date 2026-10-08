@@ -7,8 +7,8 @@ import pandas as pd
 import pytest
 
 from rvol.domain import ExperimentResult, ForecastRecord, RunIdentity
-from rvol.evaluation import ForecastEvaluator, LogMSEMetric
-from rvol.reporting import ValidationArtifactWriter
+from rvol.forecasting.evaluation import ForecastEvaluator, LogMSEMetric
+from rvol.presentation.reporting import ValidationArtifactWriter
 
 
 def run(fold: str, start: int, count: int, error: float) -> ExperimentResult:

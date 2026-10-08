@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from rvol.features.realized import daily_realized_variance
-from rvol.market.sessions import MIN_SESSION_HOURS, full_sessions
+from rvol.data.market.sessions import MIN_SESSION_HOURS, full_sessions
+from rvol.data.realized import daily_realized_variance
 
 FREQS: list[str] = [
     "1s",
@@ -41,8 +41,8 @@ def signature(
     """Summarise average daily RV across sampling frequencies.
 
     The result contains variance-scale estimates and annualised volatility.
-    Market-specific preparation lives below this diagnostic in ``market`` and
-    ``features``; numerical RV itself lives in ``estimators``.
+    Market-specific preparation lives below this diagnostic in ``data``;
+    numerical RV itself lives in ``estimators``.
     """
     frequencies = freqs or FREQS
     prices = ticks.set_index("ts")[price_col].sort_index()

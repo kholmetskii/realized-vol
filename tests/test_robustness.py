@@ -5,8 +5,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.application import WalkForwardExperiment
-from rvol.composition import standard_diagnostic_checks
 from rvol.domain import (
     ComponentSpecification,
     ExperimentConfig,
@@ -14,7 +12,8 @@ from rvol.domain import (
     TargetHorizon,
     WalkForwardSettings,
 )
-from rvol.evaluation import (
+from rvol.forecasting.composition import standard_diagnostic_checks
+from rvol.forecasting.evaluation import (
     DiagnosticCheck,
     DiagnosticResult,
     DieboldMarianoTest,
@@ -25,14 +24,15 @@ from rvol.evaluation import (
     MonthlyLossCheck,
     WinRateCheck,
 )
-from rvol.models import (
+from rvol.forecasting.execution import WalkForwardExperiment
+from rvol.forecasting.models import (
     AR1Forecaster,
     EWMAForecaster,
     HARForecaster,
     HistoricalMeanForecaster,
     NaiveForecaster,
 )
-from rvol.reporting import RobustnessArtifactWriter
+from rvol.presentation.reporting import RobustnessArtifactWriter
 
 
 def experiment_result():

@@ -8,20 +8,20 @@ import pandas as pd  # noqa: E402
 
 from rvol.diagnostics.microstructure import NoiseTest  # noqa: E402
 from rvol.domain import ExperimentResult, ForecastRecord  # noqa: E402
-from rvol.evaluation import EvaluationResult, LossRecord, ModelLossSummary  # noqa: E402
-from rvol.plotting.daily import plot_daily_realized_variance  # noqa: E402
-from rvol.plotting.diagnostics import (  # noqa: E402
+from rvol.forecasting.evaluation import EvaluationResult, LossRecord, ModelLossSummary  # noqa: E402
+from rvol.presentation.plotting.daily import plot_daily_realized_variance  # noqa: E402
+from rvol.presentation.plotting.diagnostics import (  # noqa: E402
     plot_diagnostics_overview,
     plot_volatility_signature,
 )
-from rvol.plotting.forecasting import plot_forecast_evaluation  # noqa: E402
-from rvol.plotting.microstructure import plot_bid_ask_bounce  # noqa: E402
-from rvol.plotting.returns import (  # noqa: E402
+from rvol.presentation.plotting.forecasting import plot_forecast_evaluation  # noqa: E402
+from rvol.presentation.plotting.microstructure import plot_bid_ask_bounce  # noqa: E402
+from rvol.presentation.plotting.returns import (  # noqa: E402
     plot_cumulative_iv_vs_rv,
     plot_returns_and_rv,
 )
-from rvol.plotting.sampling import plot_sampling_grids  # noqa: E402
-from rvol.plotting.simulation import (  # noqa: E402
+from rvol.presentation.plotting.sampling import plot_sampling_grids  # noqa: E402
+from rvol.presentation.plotting.simulation import (  # noqa: E402
     plot_heston_path,
     plot_simulation_overview,
 )

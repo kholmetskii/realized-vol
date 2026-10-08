@@ -1,1 +1,1 @@
-"""Market data download and parsing."""
+"""Market data acquisition, session preparation, daily variance, and coverage."""

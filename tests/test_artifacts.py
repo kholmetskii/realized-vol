@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.composition import standard_experiment_definition
 from rvol.domain import (
     ComparisonOutcome,
     ComponentSpecification,
@@ -17,11 +16,12 @@ from rvol.domain import (
     RunIdentity,
     WalkForwardSettings,
 )
-from rvol.evaluation import ForecastEvaluator
-from rvol.features.forecasting import HARFeatureBuilder
-from rvol.models import EWMAForecaster, HARForecaster
-from rvol.reporting import DatasetSnapshot, ForecastArtifactWriter
-from rvol.targets import RealizedVarianceTargetBuilder
+from rvol.forecasting.composition import standard_experiment_definition
+from rvol.forecasting.evaluation import ForecastEvaluator
+from rvol.forecasting.features import HARFeatureBuilder
+from rvol.forecasting.models import EWMAForecaster, HARForecaster
+from rvol.forecasting.targets import RealizedVarianceTargetBuilder
+from rvol.presentation.reporting import DatasetSnapshot, ForecastArtifactWriter
 
 
 @pytest.fixture
@@ -69,7 +69,7 @@ def test_artifacts_record_nondefault_settings_and_remain_deterministic(tmp_path,
     assert metadata["schema_version"] == 9
     assert experiment.execution is not None
     assert metadata["execution"] == {
-        "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",
+        "executor": "rvol.forecasting.execution.walk_forward.WalkForwardExperiment",
         "settings": {
             "name": "walk_forward",
             "implementation": "rvol.domain.settings.WalkForwardSettings",
@@ -113,9 +113,9 @@ def test_artifacts_record_nondefault_settings_and_remain_deterministic(tmp_path,
     }
     models = metadata["specification"]["models"]
     assert [model["name"] for model in models] == ["EWMA", "HAR"]
-    assert models[0]["implementation"] == "rvol.models.ewma.EWMAForecaster"
+    assert models[0]["implementation"] == "rvol.forecasting.models.ewma.EWMAForecaster"
     assert models[0]["parameters"] == {"decay": 0.8}
-    assert models[1]["implementation"] == "rvol.models.har.HARForecaster"
+    assert models[1]["implementation"] == "rvol.forecasting.models.har.HARForecaster"
     assert models[1]["parameters"] == {"variance_correction": "duan_smearing"}
     assert "intercept" not in models[1]["parameters"]  # Fitted estimates are not configuration.
 

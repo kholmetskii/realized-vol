@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from rvol.domain import FittedForecaster, UpdatablePredictor
-from rvol.models import (
+from rvol.forecasting.models import (
     AR1Forecaster,
     EWMAForecaster,
     HARForecaster,

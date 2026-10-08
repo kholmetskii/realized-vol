@@ -9,12 +9,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.application import WalkForwardExperiment, prepare_forecast_data
 from rvol.domain import ExperimentConfig, WalkForwardSettings
-from rvol.evaluation import ForecastEvaluator
-from rvol.features.forecasting import build_har_features
-from rvol.models import HARForecaster, NaiveForecaster
-from rvol.targets import RealizedVarianceTargetBuilder
+from rvol.forecasting.evaluation import ForecastEvaluator
+from rvol.forecasting.execution import WalkForwardExperiment, prepare_forecast_data
+from rvol.forecasting.features import build_har_features
+from rvol.forecasting.models import HARForecaster, NaiveForecaster
+from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 
 
 @pytest.fixture(scope="module")

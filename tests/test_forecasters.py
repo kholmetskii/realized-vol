@@ -4,14 +4,14 @@ import numpy as np
 import pytest
 
 from rvol.domain import FittedForecaster, Forecaster
-from rvol.models import (
+from rvol.forecasting.models import (
     AR1Forecaster,
     EWMAForecaster,
     HARForecaster,
     HistoricalMeanForecaster,
     NaiveForecaster,
 )
-from rvol.models.linear import LinearPredictor
+from rvol.forecasting.models.linear import LinearPredictor
 
 
 def assign_attribute(instance: object, name: str, value: object) -> None:

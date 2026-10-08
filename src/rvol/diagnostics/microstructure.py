@@ -8,11 +8,11 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from rvol.features.realized import (
+from rvol.data.market.sessions import MIN_SESSION_HOURS, full_sessions
+from rvol.data.realized import (
     daily_observation_count,
     daily_realized_variance,
 )
-from rvol.market.sessions import MIN_SESSION_HOURS, full_sessions
 
 
 @dataclass(frozen=True)

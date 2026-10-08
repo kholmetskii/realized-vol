@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from rvol.domain import ComparisonOutcome
-from rvol.evaluation import DieboldMarianoTest
-from rvol.evaluation.comparison import diebold_mariano
+from rvol.forecasting.evaluation import DieboldMarianoTest
+from rvol.forecasting.evaluation.comparison import diebold_mariano
 
 
 def test_comparison_detects_lower_candidate_loss():

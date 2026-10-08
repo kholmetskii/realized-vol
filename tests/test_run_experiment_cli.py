@@ -9,13 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.application import HoldoutExperiment
 from rvol.cli import run_experiment
-from rvol.composition import (
-    ExperimentRun,
-    standard_diagnostic_checks,
-    standard_experiment_definition,
-)
 from rvol.domain import (
     EveryNSessions,
     ExpandingWindow,
@@ -27,7 +21,13 @@ from rvol.domain import (
     TargetHorizon,
     WalkForwardSettings,
 )
-from rvol.reporting import (
+from rvol.forecasting.composition import (
+    ExperimentRun,
+    standard_diagnostic_checks,
+    standard_experiment_definition,
+)
+from rvol.forecasting.execution import HoldoutExperiment
+from rvol.presentation.reporting import (
     DatasetSnapshot,
     ForecastArtifactWriter,
     RobustnessArtifactWriter,
@@ -146,7 +146,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
     assert len(comparisons) == 2 * len(expected_pairs)
     assert metadata["schema_version"] == 9
     assert metadata["execution"] == {
-        "executor": "rvol.application.forecast_experiment.WalkForwardExperiment",
+        "executor": "rvol.forecasting.execution.walk_forward.WalkForwardExperiment",
         "settings": {
             "name": "walk_forward",
             "implementation": "rvol.domain.settings.WalkForwardSettings",
@@ -191,7 +191,7 @@ def test_forecast_cli_composes_all_models_and_honours_date_bounds(
     specification = metadata["specification"]
     assert specification["features"] == {
         "name": "HAR_features",
-        "implementation": "rvol.features.forecasting.HARFeatureBuilder",
+        "implementation": "rvol.forecasting.features.HARFeatureBuilder",
         "feature_names": ["rv_daily", "rv_weekly", "rv_monthly"],
         "parameters": {
             "date_col": "date", "rv_col": "log_rv", "weekly_window": 5,
@@ -377,7 +377,7 @@ def test_command_validates_execution_options_before_loading_data(
 def test_all_outputs_use_holdout_results_from_the_python_api(
     tmp_path, daily_dataset, monkeypatch, update, sessions, target_kind,
 ):
-    from rvol.plotting import forecasting
+    from rvol.presentation.plotting import forecasting
 
     source, daily = daily_dataset
     definition = standard_experiment_definition(

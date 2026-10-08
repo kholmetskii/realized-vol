@@ -13,11 +13,11 @@ from rvol.cli._arguments import (
     nonnegative_integer,
     positive_integer,
 )
-from rvol.composition import ROBUSTNESS_CHECK_NAMES, ExperimentRun
 from rvol.domain import ExperimentResult, HoldoutSettings, WalkForwardSettings
-from rvol.evaluation import EvaluationResult
+from rvol.forecasting.composition import ROBUSTNESS_CHECK_NAMES, ExperimentRun
+from rvol.forecasting.evaluation import EvaluationResult
 from rvol.infrastructure import ParquetDatasetRepository
-from rvol.reporting import (
+from rvol.presentation.reporting import (
     DatasetSnapshot,
     ForecastArtifactWriter,
     RobustnessArtifactWriter,
@@ -72,7 +72,7 @@ def _write_plot(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from rvol.plotting.forecasting import plot_forecast_evaluation
+    from rvol.presentation.plotting.forecasting import plot_forecast_evaluation
 
     assert run.plot_metric is not None
     target_dates = sorted({record.target_date for record in experiment.records})

@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.application import WalkForwardExperiment
 from rvol.domain import (
     ComponentSpecification,
     EveryNSessions,
@@ -15,14 +14,15 @@ from rvol.domain import (
     WalkForwardSettings,
 )
 from rvol.domain.contracts import FloatArray
-from rvol.models import (
+from rvol.forecasting.execution import WalkForwardExperiment
+from rvol.forecasting.models import (
     AR1Forecaster,
     EWMAForecaster,
     HARForecaster,
     HistoricalMeanForecaster,
     NaiveForecaster,
 )
-from rvol.models.predictors import ConstantPredictor
+from rvol.forecasting.models.predictors import ConstantPredictor
 
 
 def feature_sample(n: int = 45, seed: int = 19) -> pd.DataFrame:

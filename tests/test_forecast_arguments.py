@@ -3,7 +3,6 @@ from datetime import date
 
 import pytest
 
-from rvol.application import HoldoutExperiment, WalkForwardExperiment
 from rvol.cli._arguments import add_forecast_arguments, experiment_run_from_args
 from rvol.domain import (
     EveryNSessions,
@@ -13,6 +12,7 @@ from rvol.domain import (
     RunIdentity,
     WalkForwardSettings,
 )
+from rvol.forecasting.execution import HoldoutExperiment, WalkForwardExperiment
 
 
 def parse_config(arguments: list[str]) -> ExperimentConfig[WalkForwardSettings | HoldoutSettings]:

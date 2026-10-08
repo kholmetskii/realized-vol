@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.application import WalkForwardExperiment
 from rvol.domain import (
     ComparisonOutcome,
     ComponentSpecification,
@@ -15,8 +14,9 @@ from rvol.domain import (
     ForecastComparisonTest,
     WalkForwardSettings,
 )
-from rvol.evaluation import ForecastEvaluator, ModelLossSummary
-from rvol.models import (
+from rvol.forecasting.evaluation import ForecastEvaluator, ModelLossSummary
+from rvol.forecasting.execution import WalkForwardExperiment
+from rvol.forecasting.models import (
     AR1Forecaster,
     EWMAForecaster,
     HARForecaster,
@@ -182,7 +182,7 @@ def test_evaluator_uses_an_independent_comparison_test_and_preserves_loss_vector
 
 
 def test_injected_test_cannot_silently_ignore_a_hac_override():
-    from rvol.evaluation import DieboldMarianoTest
+    from rvol.forecasting.evaluation import DieboldMarianoTest
 
     with pytest.raises(ValueError, match="configure hac_lags on the injected"):
         ForecastEvaluator(comparison_test=DieboldMarianoTest(), hac_lags=2)

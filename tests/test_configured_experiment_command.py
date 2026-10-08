@@ -7,15 +7,15 @@ import pandas as pd
 import pytest
 
 from rvol.cli import run_experiment
-from rvol.composition import ExperimentRun, experiment_run_from_mapping
 from rvol.domain import ExperimentResult
-from rvol.evaluation import (
+from rvol.forecasting.composition import ExperimentRun, experiment_run_from_mapping
+from rvol.forecasting.evaluation import (
     EvaluationResult,
     ForecastEvaluator,
     ForecastRobustnessAnalyzer,
 )
 from rvol.infrastructure.configuration import load_experiment_configuration
-from rvol.reporting import (
+from rvol.presentation.reporting import (
     DatasetSnapshot,
     ForecastArtifactWriter,
     RobustnessArtifactWriter,
@@ -70,7 +70,7 @@ top_errors = 2
 def test_command_runs_and_evaluates_once_and_all_outputs_match_the_python_api(
     tmp_path, monkeypatch, executor, reports,
 ):
-    from rvol.plotting import forecasting
+    from rvol.presentation.plotting import forecasting
 
     daily = pd.DataFrame({
         "session": pd.bdate_range("2022-01-03", periods=75),
@@ -211,7 +211,7 @@ def test_bad_configurations_fail_before_loading_data(tmp_path, monkeypatch, caps
 
 
 def test_plot_title_is_generic_when_instrument_is_unspecified(tmp_path, monkeypatch):
-    from rvol.plotting import forecasting
+    from rvol.presentation.plotting import forecasting
 
     daily = pd.DataFrame({
         "date": pd.bdate_range("2022-01-03", periods=75),

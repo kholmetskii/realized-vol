@@ -4,8 +4,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.application import prepare_forecast_data
-from rvol.composition import standard_experiment_definition
 from rvol.domain import (
     ComponentSpecification,
     ExperimentConfig,
@@ -13,9 +11,11 @@ from rvol.domain import (
     TargetHorizon,
     WalkForwardSettings,
 )
-from rvol.features.forecasting import HARFeatureBuilder
-from rvol.models import HistoricalMeanForecaster
-from rvol.targets import RealizedVarianceTargetBuilder
+from rvol.forecasting.composition import standard_experiment_definition
+from rvol.forecasting.execution import prepare_forecast_data
+from rvol.forecasting.features import HARFeatureBuilder
+from rvol.forecasting.models import HistoricalMeanForecaster
+from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 
 
 def daily_sample(n: int = 16) -> pd.DataFrame:

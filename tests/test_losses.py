@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from rvol.evaluation.losses import log_squared_error, qlike
+from rvol.forecasting.evaluation.losses import log_squared_error, qlike
 
 
 def test_perfect_forecasts_have_zero_loss():

@@ -8,11 +8,11 @@ from typing import Any
 
 import pandas as pd
 
-from rvol.composition import ExperimentRun
-from rvol.composition.configuration import experiment_run_from_mapping
 from rvol.domain import HoldoutSettings, WalkForwardSettings
+from rvol.forecasting.composition import ExperimentRun
+from rvol.forecasting.composition.configuration import experiment_run_from_mapping
 from rvol.infrastructure.configuration import load_experiment_configuration
-from rvol.reporting import DatasetSnapshot
+from rvol.presentation.reporting import DatasetSnapshot
 
 
 def iso_date(value: str) -> dt.date:

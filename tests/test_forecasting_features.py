@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from rvol.domain import FeatureBuilder
-from rvol.features.forecasting import HARFeatureBuilder, build_har_features
+from rvol.forecasting.features import HARFeatureBuilder, build_har_features
 
 
 def daily_sample(n_sessions: int = 35) -> pd.DataFrame:
