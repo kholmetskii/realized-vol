@@ -13,48 +13,33 @@ with error?
 
 ## Architecture
 
-    src/rvol/domain/                  shared contracts and immutable value objects
+    src/rvol/domain/          settings, contracts and immutable results
+    src/rvol/data/            ticks, market sessions and daily datasets
+    src/rvol/estimators/      variance formulas on arrays
     src/rvol/forecasting/
-        execution/                    data alignment, walk-forward and holdout
-        composition/                  experiment assembly and configuration resolution
-        models/                       interchangeable forecasting models
-        evaluation/                   losses, comparisons, validation and robustness
-        features.py                   past-only HAR inputs
-        targets.py                    future realized-variance outcomes
-    src/rvol/data/                    tick downloads, daily datasets and coverage
-        market/                       FX sessions, sampling and daily-series validation
-    src/rvol/estimators/              pure numerical variance estimators
-    src/rvol/diagnostics/             tick-data noise and volatility signatures
-    src/rvol/simulation/              latent prices, noise and Monte Carlo checks
-    src/rvol/presentation/
-        plotting/                     research figures
-        reporting/                    deterministic CSV, JSON and Markdown outputs
-    src/rvol/infrastructure/          Parquet and TOML persistence adapters
-    src/rvol/cli/                     command arguments and workflow coordination
-    scripts/                          runnable experiment and supporting commands
-    tests/                            numerical, workflow and dependency checks
+        features.py          past-only inputs
+        targets.py           future variance outcomes
+        models/              fit and predict
+        execution/           chronological training and forecasting
+        evaluation/          losses, comparisons and robustness
+        composition/         Experiment and TOML configuration
+    src/rvol/presentation/   plots and saved reports
+    src/rvol/infrastructure/ Parquet and TOML input/output
+    src/rvol/cli/            command coordination
+    src/rvol/diagnostics/    tick-data noise and volatility signatures
+    src/rvol/simulation/     price paths, noise and Monte Carlo checks
 
-See the [source guide](src/README.md) for module locations, import examples,
-and dependency rules. Forecasting components now use `rvol.forecasting.*`;
-plots and artifact writers use `rvol.presentation.*`. Saved TOML component
-names and command paths are unchanged.
+Models own fitting, execution owns observation availability and refitting, and
+evaluation consumes the saved forecasts. Composition connects these steps
+through one `Experiment` object. Tests enforce these boundaries, including
+between nested packages. Shared contracts and results stay in `domain`;
+numerical code stays independent of files, command arguments and reports.
+
+Use functions for stateless calculations, dataclasses for settings and records,
+and classes for configured behavior or fitted model state. Protocols describe
+interchangeable components; abstract base classes are not required.
 
 Additional noise- and jump-robust estimators are not yet implemented.
-
-The forecasting dependency direction points toward stable contracts:
-
-    cli
-       ├── forecasting.composition
-       │      ├── execution ──> domain
-       │      ├── models ─────> domain
-       │      ├── evaluation ─> domain
-       │      └── features / targets ──> domain + data.market
-       ├── presentation ──> domain + forecasting.evaluation
-       └── infrastructure
-
-Models, execution and evaluation remain independent of one another. Grouping
-under `forecasting` does not allow a model to import an executor or report writer;
-tests enforce the boundaries of the nested packages separately.
 
 Installed environments expose `rvol-run-experiment`. The equivalent
 repository entry point is `python scripts/run_experiment.py`. It runs the
@@ -62,9 +47,9 @@ experiment once and saves numerical results, with optional plots and robustness
 reports generated from the same forecasts and losses.
 
 Supporting commands are grouped by purpose under `scripts/data`,
-`scripts/diagnostics`, and `scripts/simulation`. See the
-[scripts guide](scripts/README.md) for the directory map and examples. Run
-commands from the repository root so input and output paths resolve consistently.
+`scripts/diagnostics`, and `scripts/simulation`. Run commands from the repository
+root with the project environment active so input and output paths resolve
+consistently. Each command supports `--help`.
 
 The independent data-preparation pipeline is:
 
@@ -74,13 +59,11 @@ The independent data-preparation pipeline is:
 `data.market` contains no variance formulas. `data.realized` combines the
 timestamp rules with estimators; `data.dataset` assembles the daily observations
 consumed by forecasting features and targets. Forecast models implement the
-domain `Forecaster` protocol, and Parquet persistence
-implements `DatasetRepository`; neither is hard-coded into the experiment.
+domain `Forecaster` protocol; persistence stays outside the numerical code.
 
 To add a model, implement `name`, `feature_names`, `specification`, and `fit`,
-then inject the new object into `WalkForwardExperiment`. The experiment and
-evaluator do not need model-specific branches. Tests enforce the dependency
-direction so an inner layer cannot accidentally import an outer adapter.
+then include the object in `Experiment.models`. Execution and evaluation use
+the common interface without model-specific branches.
 
 All models share one array-based interface: `fit(features, target)` returns a
 fitted object with `predict(features)`. Features are two-dimensional arrays
@@ -106,51 +89,35 @@ removed. Convert DataFrames to arrays at the call site and use the common API:
 Fitted coefficients are available as `fitted.intercept` and
 `fitted.coefficients`, with slopes in `model.feature_names` order.
 
-The experiment command resolves an `ExperimentRun` through
-`rvol.forecasting.composition.experiment_run_from_mapping`, using
-`standard_experiment_definition` for defaults. Its definition selects the feature
-builder, target builder, models, executor factory, metrics, evaluation comparison
-pairs, plot candidate, and robustness baselines together. Construct a different
-definition to use other features, targets, models, execution methods, metrics,
-or comparison choices:
+`Experiment` holds the configuration, feature and target builders, models, and
+evaluation choices. `standard_experiment(config)` selects the five built-in
+models. Load data, run once, evaluate, and export explicitly:
 
-    from rvol.forecasting.composition import standard_experiment_definition
+    from pathlib import Path
     from rvol.domain import ExperimentConfig, WalkForwardSettings
+    from rvol.forecasting.composition import standard_experiment
+    from rvol.infrastructure import ParquetDatasetRepository
+    from rvol.presentation.reporting import DatasetSnapshot, ForecastArtifactWriter
 
-    definition = standard_experiment_definition()
+    source = Path("data/derived/EURUSD_daily_rv_5min.parquet")
+    daily = ParquetDatasetRepository(source).load()
     config = ExperimentConfig(execution=WalkForwardSettings(min_train_size=252))
-    experiment = definition.run(daily, config)
-    evaluation = definition.evaluator().evaluate(experiment)
+    experiment = standard_experiment(config)
+    result = experiment.run(daily)
+    evaluation = experiment.evaluator().evaluate(result)
+    paths = ForecastArtifactWriter("outputs/experiment").write(
+        result, evaluation, config=experiment.config,
+        dataset=DatasetSnapshot.from_frame(source, daily),
+        specification=experiment.specification,
+        configuration=experiment.resolved_configuration,
+    )
 
-`ExperimentExecutor[Dataset]` is the execution contract: `run(features)` returns
-an `ExperimentResult`. `ExperimentDefinition` receives an `executor_factory`
-that accepts `(models, config)` and creates a fresh executor for each call to
-`definition.run`. The definition aligns features with targets and delegates
-execution; the executor owns fitting, observation availability and forecasting.
-Executors preserve the prepared input and keep fitted state local to each run.
-
-The standard factory is `WalkForwardExperiment`. Select another implementation
-through the same composition entry point:
-
-    definition = standard_experiment_definition(executor_factory=CustomExecutor)
-
-`CustomExecutor(models, config)` must implement `run(features)`. Independently
-constructed `ExperimentDefinition` objects also require an `executor_factory`.
-Executors return the common forecast records so evaluation and plotting can be
-reused; artifact export additionally requires the run configuration, execution
-snapshot and fit boundaries described below. Executors can use independent
-settings types and retain run/fold identities and target definitions in the
-common results.
-
-`ExperimentConfig[Settings]` contains shared reporting dates and a required
-`execution` settings object. `ExperimentDefinition[Settings]` binds its executor
-factory to that settings type. Each execution method validates its own settings;
-the shared configuration does not impose training windows or refitting rules.
-`ExperimentRun(definition, config)` binds a compatible definition and settings
-for repeated calls to `run.run(daily)`. The command uses this same object when
-selecting an executor.
-`holdout_experiment_definition()` assembles the standard models and features
-with holdout execution; composition owns concrete executor selection.
+`ExperimentConfig.execution` accepts `WalkForwardSettings` or `HoldoutSettings`;
+the experiment selects the matching execution method directly. Each call to
+`run(daily)` creates fresh fitted state and returns an `ExperimentResult`.
+Use `dataclasses.replace(experiment, config=new_config)` to reuse the selected
+components with different dates or execution settings. TOML/CLI configuration
+and saved output formats retain their existing behavior.
 
 Saved experiments use TOML configuration version 1. The complete baseline is
 in [`experiments/eurusd.toml`](experiments/eurusd.toml). Run it once to generate
@@ -171,19 +138,38 @@ subdirectory. Omit either flag when its output is not needed. The default output
 directory is `outputs/experiment`; use a different directory for each experiment
 whose results you want to retain.
 
-To run only HAR, use [`experiments/har.toml`](experiments/har.toml):
+To select models on the command line, use
+[`experiments/base.toml`](experiments/base.toml). It holds shared EUR/USD dates,
+target, training settings, metrics and plot preferences. For example, run EWMA:
 
     python scripts/run_experiment.py \
         data/derived/EURUSD_daily_rv_5min.parquet \
-        --config experiments/har.toml \
+        --config experiments/base.toml \
+        --models EWMA \
+        --candidate EWMA \
+        --run-id ewma_only \
+        --output-dir outputs/ewma \
+        --plot \
+        --robustness
+
+Choose `naive`, `AR1`, `historical_mean`, or `HAR` in both model flags to run
+another model, with a distinct run ID and output directory. A single-model run
+uses monthly losses and largest errors for robustness. Omitting model selection
+retains the standard five models, with HAR as candidate and the others as
+baselines. Model parameters use the built-in defaults; save a complete experiment
+configuration when you need custom model parameters. Comparison choices follow
+the selected models and explicit command options.
+
+Run HAR through the same shared configuration:
+
+    python scripts/run_experiment.py \
+        data/derived/EURUSD_daily_rv_5min.parquet \
+        --config experiments/base.toml \
+        --models HAR \
+        --candidate HAR \
+        --run-id har_only \
         --output-dir outputs/har \
         --plot
-
-This forecasts next-session variance with expanding history and daily refitting.
-Its comparison list is empty, and its optional robustness report contains
-monthly losses and largest errors. With no saved configuration, `--models HAR`
-also selects a single-model run; choose `--candidate NAME` when selecting a
-model other than HAR.
 
 The input dataset and output destinations are command arguments. The saved
 configuration selects the experiment's components and settings:
@@ -213,7 +199,7 @@ when using renamed daily columns, or select a different variance series for
 the labels. Metrics are `QLIKE` and `log-RV MSE`; the registered
 comparison test is `name = "DM"`, with optional `hac_lags` and `min_hac_lags`.
 The named registries live in composition; Python callers can still inject
-independent implementations directly through `ExperimentDefinition`.
+independent models, builders and evaluation components directly through `Experiment`.
 
 Precedence is **built-in defaults → saved configuration → explicit command
 options**. For example, append `--horizon 5 --target-kind cumulative` to change
@@ -252,7 +238,7 @@ Explicit comparison references must name selected models. When no baselines
 are selected, omitted robustness checks default to monthly losses and largest
 errors. Explicit comparison diagnostics still require a baseline. A saved
 single-model configuration can set empty `baselines` and
-`comparison_pairs` lists, as in `experiments/har.toml`.
+`comparison_pairs` lists.
 
 Unknown sections, components or parameters, incompatible options, invalid
 counts/dates, model references and unavailable plot metrics are rejected before
@@ -261,26 +247,24 @@ import arbitrary Python objects.
 
 For the same composition from Python:
 
-    from rvol.forecasting.composition import experiment_run_from_mapping
+    from rvol.forecasting.composition import experiment_from_mapping
     from rvol.infrastructure.configuration import load_experiment_configuration
 
-    run = experiment_run_from_mapping(
+    experiment = experiment_from_mapping(
         load_experiment_configuration("experiments/eurusd.toml"),
     )
-    experiment = run.run(daily)
-    evaluation = run.definition.evaluator().evaluate(experiment)
-    robustness = run.definition.robustness_analyzer(
-        checks=run.diagnostic_checks,
-    ).analyze(experiment, evaluation=evaluation)
-    settings = run.resolved_configuration
+    result = experiment.run(daily)
+    evaluation = experiment.evaluator().evaluate(result)
+    robustness = experiment.robustness_analyzer().analyze(result, evaluation=evaluation)
+    settings = experiment.resolved_configuration
 
-`ExperimentRun` also retains diagnostic selection and the plot metric. Its
+`Experiment` also retains diagnostic selection and the plot metric. Its
 `resolved_configuration` snapshots actual component implementations, parameters,
 execution policies and workflow choices, including applied defaults and command
 overrides. The command stores this snapshot in `experiment.json` and
 `robustness.json`; forecast figures receive a `<image filename>.json` sidecar
 with resolved settings, dataset fingerprint and coverage. Direct artifact-writer
-calls can pass `configuration=run.resolved_configuration` to retain that snapshot.
+calls can pass `configuration=experiment.resolved_configuration` to retain that snapshot.
 
 `dataset.instrument` and `--instrument` are explicit labels; no instrument is
 inferred from filenames. The label is retained in run metadata, evaluation and
@@ -291,10 +275,11 @@ The target is selected separately from execution settings:
 
     from rvol.domain import TargetHorizon
 
-    definition = standard_experiment_definition(
+    experiment = standard_experiment(
+        config,
         target_horizon=TargetHorizon(sessions=5, kind="cumulative"),
     )
-    experiment = definition.run(daily, config)
+    result = experiment.run(daily)
 
 For a forecast made after session `t`, the two target kinds mean:
 
@@ -328,9 +313,7 @@ can be produced.
 
 Evaluation keeps the default naive-versus-HAR comparison and accepts ordered
 `--compare` overrides. Plots and robustness use the configured candidate and
-baseline list, with the
-requested HAC lags and top-error count. The existing
-`run_standard_forecast_experiment` helper delegates to the same definition.
+baseline list, with the requested HAC lags and top-error count.
 
 Direct `ForecastEvaluator` calls calculate loss summaries without implicit
 model comparisons; pass `comparison_pairs` explicitly when needed. Direct
@@ -357,11 +340,11 @@ Injected tests retain their own settings and sample requirements.
     from dataclasses import replace
     from rvol.forecasting.evaluation import DieboldMarianoTest
 
-    definition = replace(
-        standard_experiment_definition(),
+    experiment = replace(
+        experiment,
         comparison_test=DieboldMarianoTest(hac_lags=5),
     )
-    evaluation = definition.evaluator().evaluate(experiment)
+    evaluation = experiment.evaluator().evaluate(result)
 
 Replace that object with an independent test to use the same evaluator and
 artifact writer. The `hac_lags` convenience override applies only to DM; custom
@@ -376,10 +359,10 @@ comparison.
 
     from rvol.forecasting.evaluation import MonthlyLossCheck, LargestErrorsCheck
 
-    analyzer = definition.robustness_analyzer(
+    analyzer = experiment.robustness_analyzer(
         checks=(MonthlyLossCheck(), LargestErrorsCheck(top_errors=3)),
     )
-    robustness = analyzer.analyze(experiment)
+    robustness = analyzer.analyze(result)
 
 Each check supplies a `DiagnosticResult` with immutable rows, CSV columns,
 report labels and formatting templates. `RobustnessArtifactWriter` renders these
@@ -404,15 +387,17 @@ Run and fold identities belong to shared configuration:
     from rvol.domain import RunIdentity
     from rvol.presentation.reporting import ValidationArtifactWriter
 
-    first = definition.run(daily, replace(
-        config, identity=RunIdentity("eurusd", "fold_a"),
+    first_config = replace(
+        experiment.config, identity=RunIdentity("eurusd", "fold_a"),
         forecast_start=date(2025, 1, 1), forecast_end=date(2025, 6, 30),
-    ))
-    second = definition.run(daily, replace(
-        config, identity=RunIdentity("eurusd", "fold_b"),
+    )
+    second_config = replace(
+        experiment.config, identity=RunIdentity("eurusd", "fold_b"),
         forecast_start=date(2025, 4, 1), forecast_end=date(2025, 9, 30),
-    ))
-    validation = definition.evaluator().evaluate_runs((first, second))
+    )
+    first = replace(experiment, config=first_config).run(daily)
+    second = replace(experiment, config=second_config).run(daily)
+    validation = experiment.evaluator().evaluate_runs((first, second))
     ValidationArtifactWriter("outputs/validation").write(validation)
 
 The pair `(run_id, fold_id)` identifies one independently scored run. The
@@ -454,28 +439,30 @@ source columns, interval dates and log-variance labels. It retains incomplete
 trailing outcomes with missing labels and end dates. `target_date` is the final
 session of the interval and determines when the outcome becomes available.
 
-`definition.prepare(daily)` builds both tables and joins them by `origin_date`.
+`experiment.prepare(daily)` builds both tables and joins them by `origin_date`.
 It validates unique origins, matching target metadata and valid intervals, and
 omits incomplete future outcomes before execution. A feature builder can omit
 warm-up or unavailable rows without changing which sessions each target covers.
 For direct executor calls, assemble inputs explicitly:
 
-    from rvol.forecasting.execution import prepare_forecast_data
+    from rvol.domain import TargetHorizon
+    from rvol.forecasting.execution import WalkForwardExperiment, prepare_forecast_data
     from rvol.forecasting.features import HARFeatureBuilder
     from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 
     features = HARFeatureBuilder()(daily)
     targets = RealizedVarianceTargetBuilder(TargetHorizon(5, "cumulative"))(daily)
     prepared = prepare_forecast_data(features, targets)
-    experiment = executor.run(prepared)
+    executor = WalkForwardExperiment(experiment.models, experiment.config)
+    result = executor.run(prepared)
 
 Custom feature and target builders can be injected independently through
-`ExperimentDefinition(feature_builder=..., target_builder=..., ...)`; both use
-the same alignment and executor availability rules. Use the standard definition
-factory's `target_horizon` argument or saved `[target]` settings to also derive
+`replace(experiment, feature_builder=..., target_builder=...)`; both use
+the same alignment and executor availability rules. Use `standard_experiment`'s
+`target_horizon` argument or saved `[target]` settings to also derive
 the standard naive multiplier and minimum comparison-test lag.
 
-Use `definition.specification` to snapshot the selected feature builder,
+Use `experiment.specification` to snapshot the selected feature builder,
 target builder and models before running an experiment. Custom components describe their own
 settings; reporting depends on these domain values rather than importing
 concrete models or duplicating their defaults. Direct `ForecastArtifactWriter`
@@ -483,7 +470,7 @@ calls now require this snapshot as the `specification` keyword argument.
 
 Execution policies select the strategy used by a walk-forward run:
 
-    from rvol.forecasting.composition import standard_experiment_definition
+    from rvol.forecasting.composition import standard_experiment
     from rvol.domain import EveryNSessions, ExperimentConfig, RollingWindow, WalkForwardSettings
 
     settings = WalkForwardSettings(
@@ -492,8 +479,8 @@ Execution policies select the strategy used by a walk-forward run:
         min_train_size=252,
     )
     config = ExperimentConfig(execution=settings)
-    definition = standard_experiment_definition()
-    experiment = definition.run(daily, config)
+    experiment = standard_experiment(config)
+    result = experiment.run(daily)
 
 `TrainingWindowPolicy.select(n_available)` returns a slice of chronological,
 already eligible training rows. `ExpandingWindow` selects all of them;
@@ -538,17 +525,15 @@ metadata. `ExecutionMetadata` records the actual executor implementation, an
 `ExecutionSpecification` snapshot and scalar runtime `facts`. Settings describe
 their own component and any named policies. Walk-forward supplies its schedule
 anchor and observation-update rule as runtime facts; the artifact writer adds
-no execution rules. Custom settings implement `DescribedExecutionSettings` for
-export, and custom window and refit policies provide component specifications.
+no execution rules. Custom window and refit policies provide component
+specifications.
 
 Chronological holdout uses a separate executor and settings type:
 
     from datetime import date
-    from rvol.forecasting.execution import HoldoutExperiment
-    from rvol.forecasting.composition import standard_experiment_definition
+    from rvol.forecasting.composition import standard_experiment
     from rvol.domain import ExperimentConfig, HoldoutSettings
 
-    definition = standard_experiment_definition(executor_factory=HoldoutExperiment)
     config = ExperimentConfig(
         execution=HoldoutSettings(
             train_end=date(2024, 12, 31),
@@ -557,8 +542,9 @@ Chronological holdout uses a separate executor and settings type:
         ),
         forecast_start=date(2025, 1, 1),
     )
-    experiment = definition.run(daily, config)
-    evaluation = definition.evaluator().evaluate(experiment)
+    experiment = standard_experiment(config)
+    result = experiment.run(daily)
+    evaluation = experiment.evaluator().evaluate(result)
 
 Holdout fits once using every prepared row whose target date is on or before
 `train_end`, and requires the minimum training count at that cutoff. Forecast
@@ -683,7 +669,9 @@ The scripts write `figures/sampling_grids.png`, `figures/returns_and_rv.png`,
 `figures/simulation_overview.png`, `figures/forecast_evaluation.png`, and
 `figures/diagnostics_overview.png`.
 Use `scripts/diagnostics/signature_plot.py` when only one mid, bid, or ask signature is
-needed.
+needed, or `python scripts/diagnostics/noise_report.py TICKS.parquet` for a
+numerical report comparing fine and coarse sampling. Simulation scripts use
+generated data; diagnostics scripts use real tick datasets.
 
 ## Build the daily dataset
 
