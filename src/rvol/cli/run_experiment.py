@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from rvol.cli._arguments import (
     add_forecast_arguments,
     experiment_from_args,
     forecast_dataset_snapshot,
-    nonnegative_integer,
-    positive_integer,
 )
 from rvol.domain import ExperimentResult
-from rvol.forecasting.composition import ROBUSTNESS_CHECK_NAMES, Experiment
+from rvol.forecasting.composition import Experiment
 from rvol.forecasting.evaluation import EvaluationResult
 from rvol.infrastructure import ParquetDatasetRepository
 from rvol.presentation.reporting import (
@@ -98,7 +96,8 @@ def _write_plot(
     return output, metadata
 
 
-def main() -> None:
+def main(experiment: Experiment | None = None, argv: Sequence[str] | None = None) -> None:
+    """Run a Python-defined setup with paths, model selections and output options."""
     parser = argparse.ArgumentParser(
         description="Run a forecast experiment once and save its results.", allow_abbrev=False,
     )
@@ -111,51 +110,34 @@ def main() -> None:
     parser.add_argument(
         "--robustness", action="store_true", help="also save diagnostics under robustness/",
     )
-    parser.add_argument(
-        "--compare", action="append", nargs=2, metavar=("BASELINE", "CANDIDATE"),
-        help="evaluation comparison; may be repeated and replaces saved comparisons",
-    )
-    parser.add_argument("--hac-lags", type=nonnegative_integer, help="explicit DM lag count")
-    parser.add_argument("--metric", help="metric to plot; requires --plot")
-    parser.add_argument(
-        "--check", action="append", choices=ROBUSTNESS_CHECK_NAMES,
-        help="diagnostic to include; may be repeated and requires --robustness",
-    )
-    parser.add_argument("--max-hac-lag", type=nonnegative_integer, help="requires --robustness")
-    parser.add_argument("--top-errors", type=positive_integer, help="requires --robustness")
-    args = parser.parse_args()
-    if args.metric is not None and not args.plot:
-        parser.error("--metric requires --plot")
-    for option in ("check", "max_hac_lag", "top_errors"):
-        if getattr(args, option) is not None and not args.robustness:
-            parser.error(f"--{option.replace('_', '-')} requires --robustness")
-    run = experiment_from_args(parser, args)
+    args = parser.parse_args(argv)
+    run = experiment_from_args(parser, args, experiment)
 
     daily = ParquetDatasetRepository(args.daily).load()
-    experiment = run.run(daily)
-    if not experiment.records:
-        raise SystemExit("no forecasts: add more data or lower --min-train-size")
-    evaluation = run.evaluator().evaluate(experiment)
+    dataset = forecast_dataset_snapshot(args.daily, daily, run)
+    result = run.run(daily)
+    if not result.records:
+        raise SystemExit("no forecasts: check data, reporting dates and Python training settings")
+    evaluation = run.evaluator().evaluate(result)
     robustness = (
         run.robustness_analyzer().analyze(
-            experiment, evaluation=evaluation,
+            result, evaluation=evaluation,
         ) if args.robustness else None
     )
-    dataset = forecast_dataset_snapshot(args.daily, daily, run)
     configuration = run.resolved_configuration
     output_dir = Path(args.output_dir)
     paths = list(ForecastArtifactWriter(output_dir).write(
-        experiment, evaluation, config=run.config, dataset=dataset,
+        result, evaluation, config=run.config, dataset=dataset,
         specification=run.specification, configuration=configuration,
     ).all())
     if args.plot:
-        paths.extend(_write_plot(run, experiment, evaluation, output_dir, dataset, configuration))
+        paths.extend(_write_plot(run, result, evaluation, output_dir, dataset, configuration))
     if robustness is not None:
         paths.extend(RobustnessArtifactWriter(output_dir / "robustness").write(
             robustness, configuration=configuration,
         ).all())
 
-    _print_evaluation(experiment, evaluation)
+    _print_evaluation(result, evaluation)
     if args.plot:
         print(f"\nplot metric: {run.plot_metric}")
     if robustness is not None:

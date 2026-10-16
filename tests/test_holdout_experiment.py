@@ -8,8 +8,9 @@ import pytest
 from rvol.domain import ExperimentConfig, HoldoutSettings
 from rvol.domain.contracts import FloatArray
 from rvol.forecasting.composition import standard_experiment
+from rvol.forecasting.evaluation import DieboldMarianoTest
 from rvol.forecasting.execution import HoldoutExperiment
-from rvol.forecasting.models import EWMAForecaster, HistoricalMeanForecaster, NaiveForecaster
+from rvol.forecasting.models import EWMAModel, HistoricalMeanModel, NaiveModel
 from rvol.forecasting.models.predictors import ConstantPredictor
 from rvol.presentation.reporting import DatasetSnapshot, ForecastArtifactWriter
 
@@ -27,7 +28,7 @@ def cutoff_for(features: pd.DataFrame, position: int = 9) -> date:
     return pd.Timestamp(features["target_date"].iloc[position]).date()
 
 
-class RecordingMean(HistoricalMeanForecaster):
+class RecordingMean(HistoricalMeanModel):
     def __init__(self) -> None:
         self.training_targets: list[FloatArray] = []
 
@@ -42,7 +43,7 @@ def test_holdout_fits_once_on_available_labels_and_retains_fit_boundaries():
     model = RecordingMean()
     cutoff = cutoff_for(features)
     config = ExperimentConfig(execution=HoldoutSettings(cutoff, min_train_size=5))
-    experiment = HoldoutExperiment((model, NaiveForecaster()), config)
+    experiment = HoldoutExperiment((model, NaiveModel()), config)
 
     result = experiment.run(features)
 
@@ -71,7 +72,7 @@ def test_holdout_reporting_dates_preserve_full_run_predictions_and_state(update)
     features = features_sample()
     settings = HoldoutSettings(cutoff_for(features), min_train_size=5, update_observations=update)
     config = ExperimentConfig(execution=settings)
-    models = (EWMAForecaster(decay=0.5), NaiveForecaster())
+    models = (EWMAModel(decay=0.5), NaiveModel())
     full = HoldoutExperiment(models, config).run(features)
     start, end = cutoff_for(features, 17), cutoff_for(features, 24)
     bounded = HoldoutExperiment(models, replace(
@@ -90,7 +91,7 @@ def test_future_outcomes_cannot_enter_their_own_forecast(update):
     config = ExperimentConfig(execution=HoldoutSettings(
         cutoff_for(original), min_train_size=5, update_observations=update,
     ))
-    runner = HoldoutExperiment((EWMAForecaster(), HistoricalMeanForecaster()), config)
+    runner = HoldoutExperiment((EWMAModel(), HistoricalMeanModel()), config)
     before = runner.run(original)
     after = runner.run(changed)
     day = cutoff_for(original, 15)
@@ -102,7 +103,7 @@ def test_future_outcomes_cannot_enter_their_own_forecast(update):
 
 def test_holdout_uses_fresh_features_without_refitting():
     features = features_sample()
-    result = HoldoutExperiment((NaiveForecaster(),), ExperimentConfig(
+    result = HoldoutExperiment((NaiveModel(),), ExperimentConfig(
         execution=HoldoutSettings(cutoff_for(features), min_train_size=5),
     )).run(features)
 
@@ -114,7 +115,7 @@ def test_holdout_uses_fresh_features_without_refitting():
 @pytest.mark.parametrize("update", [False, True])
 def test_holdout_ewma_observation_updates_follow_the_explicit_setting(update):
     features = features_sample()
-    result = HoldoutExperiment((EWMAForecaster(decay=0.5),), ExperimentConfig(
+    result = HoldoutExperiment((EWMAModel(decay=0.5),), ExperimentConfig(
         execution=HoldoutSettings(cutoff_for(features), 5, update),
     )).run(features)
     variances = np.exp(features["target"].to_numpy())
@@ -136,7 +137,7 @@ def test_holdout_updates_handle_delayed_labels_and_multirow_batches():
         "target_date": pd.to_datetime(["2024-01-03", "2024-01-07", "2024-01-09", "2024-01-11"]),
         "target": np.log([1.0, 4.0, 9.0, 16.0]),
     })
-    result = HoldoutExperiment((EWMAForecaster(decay=0.5),), ExperimentConfig(
+    result = HoldoutExperiment((EWMAModel(decay=0.5),), ExperimentConfig(
         execution=HoldoutSettings(date(2024, 1, 3), 1, True),
     )).run(features)
 
@@ -149,7 +150,7 @@ def test_nontrading_cutoff_uses_only_labels_already_available():
     friday = cutoff_for(features, 8)
     assert friday.weekday() == 4
     saturday = friday + timedelta(days=1)
-    result = HoldoutExperiment((HistoricalMeanForecaster(),), ExperimentConfig(
+    result = HoldoutExperiment((HistoricalMeanModel(),), ExperimentConfig(
         execution=HoldoutSettings(saturday, min_train_size=5),
     )).run(features)
 
@@ -162,7 +163,7 @@ def test_nontrading_cutoff_uses_only_labels_already_available():
 def test_holdout_requires_enough_training_data_at_the_fixed_cutoff():
     features = features_sample()
     with pytest.raises(ValueError, match="contains 10 observations.*requires at least 11"):
-        HoldoutExperiment((HistoricalMeanForecaster(),), ExperimentConfig(
+        HoldoutExperiment((HistoricalMeanModel(),), ExperimentConfig(
             execution=HoldoutSettings(cutoff_for(features), min_train_size=11),
         )).run(features)
 
@@ -195,9 +196,9 @@ def test_holdout_composes_with_the_common_evaluator_and_artifact_writer(tmp_path
     source = tmp_path / "daily.parquet"
     daily.to_parquet(source, index=False)
     config = ExperimentConfig(execution=HoldoutSettings(dates[40].date(), min_train_size=10))
-    workflow = standard_experiment(config)
+    workflow = replace(standard_experiment(config), comparison_test=DieboldMarianoTest(hac_lags=0))
     result = workflow.run(daily)
-    evaluation = workflow.evaluator(hac_lags=0).evaluate(result)
+    evaluation = workflow.evaluator().evaluate(result)
     snapshot = DatasetSnapshot.from_frame(source, daily)
     writer = ForecastArtifactWriter(tmp_path / "output")
     paths = writer.write(
@@ -206,7 +207,7 @@ def test_holdout_composes_with_the_common_evaluator_and_artifact_writer(tmp_path
     first = {p.name: p.read_bytes() for p in paths.all()}
     repeated = workflow.run(daily)
     writer.write(
-        repeated, workflow.evaluator(hac_lags=0).evaluate(repeated),
+        repeated, workflow.evaluator().evaluate(repeated),
         config=config, dataset=snapshot, specification=workflow.specification,
     )
 

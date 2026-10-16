@@ -14,11 +14,18 @@ from rvol.domain import (
 from rvol.forecasting.composition import (
     Experiment,
     standard_experiment,
-    standard_forecasters,
+    standard_models,
 )
-from rvol.forecasting.evaluation import LogMSEMetric
+from rvol.forecasting.evaluation import (
+    DieboldMarianoTest,
+    LagSensitivityCheck,
+    LargestErrorsCheck,
+    LogMSEMetric,
+    MonthlyLossCheck,
+    WinRateCheck,
+)
 from rvol.forecasting.execution import HoldoutExperiment, WalkForwardExperiment
-from rvol.forecasting.models import HistoricalMeanForecaster, NaiveForecaster
+from rvol.forecasting.models import HistoricalMeanModel, NaiveModel
 from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 
 
@@ -33,8 +40,8 @@ def daily_sample(n_sessions: int = 50) -> pd.DataFrame:
     })
 
 
-def test_standard_forecasters_define_the_project_model_set():
-    assert [model.name for model in standard_forecasters()] == [
+def test_standard_models_define_the_project_model_set():
+    assert [model.name for model in standard_models()] == [
         "historical_mean",
         "naive",
         "EWMA",
@@ -59,8 +66,8 @@ def test_standard_experiment_preserves_each_workflows_comparison_choices():
     ))
     experiment = definition.run(daily_sample())
 
-    evaluation = definition.evaluator(hac_lags=0).evaluate(experiment)
-    robustness = definition.robustness_analyzer(hac_lags=(0,), top_errors=1).analyze(experiment)
+    evaluation = definition.evaluator().evaluate(experiment)
+    robustness = definition.robustness_analyzer().analyze(experiment)
 
     assert [metric.name for metric in definition.metrics] == ["QLIKE", "log-RV MSE"]
     assert definition.candidate_model == "HAR"
@@ -75,16 +82,18 @@ def test_standard_experiment_preserves_each_workflows_comparison_choices():
     ]
 
 
-def test_definition_preserves_comparison_overrides_including_empty_pairs():
+def test_experiment_settings_select_comparisons_including_empty_pairs():
     definition = standard_experiment(ExperimentConfig(
         execution=WalkForwardSettings(min_train_size=10),
     ))
     experiment = definition.run(daily_sample())
 
-    overridden = definition.evaluator(
-        comparison_pairs=(("EWMA", "AR1"),), hac_lags=0,
-    ).evaluate(experiment)
-    summaries_only = definition.evaluator(comparison_pairs=()).evaluate(experiment)
+    comparisons = replace(
+        definition, comparison_pairs=(("EWMA", "AR1"),),
+        comparison_test=DieboldMarianoTest(hac_lags=0),
+    )
+    overridden = comparisons.evaluator().evaluate(experiment)
+    summaries_only = replace(definition, comparison_pairs=()).evaluator().evaluate(experiment)
 
     assert {
         (item.baseline_model, item.candidate_model) for item in overridden.comparisons
@@ -107,17 +116,21 @@ def test_definition_supports_other_feature_builders_models_metrics_and_candidate
 
     definition = Experiment(
         config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=3)),
-        models=(HistoricalMeanForecaster(), NaiveForecaster()),
+        models=(HistoricalMeanModel(), NaiveModel()),
         feature_builder=DailyFeatures(),
         target_builder=RealizedVarianceTargetBuilder(),
         metrics=(LogMSEMetric(),),
         comparison_pairs=(("historical_mean", "naive"),),
         candidate_model="naive",
         baseline_models=("historical_mean",),
+        comparison_test=DieboldMarianoTest(hac_lags=0),
+        diagnostic_checks=(
+            LagSensitivityCheck((0,)), WinRateCheck(), MonthlyLossCheck(), LargestErrorsCheck(1),
+        ),
     )
     experiment = definition.run(daily_sample(8))
-    evaluation = definition.evaluator(hac_lags=0).evaluate(experiment)
-    robustness = definition.robustness_analyzer(hac_lags=(0,), top_errors=1).analyze(experiment)
+    evaluation = definition.evaluator().evaluate(experiment)
+    robustness = definition.robustness_analyzer().analyze(experiment)
 
     assert experiment.models == ("historical_mean", "naive")
     assert experiment.n_forecasts == 8

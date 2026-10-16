@@ -16,11 +16,11 @@ from rvol.domain import (
 from rvol.domain.contracts import FloatArray
 from rvol.forecasting.execution import WalkForwardExperiment
 from rvol.forecasting.models import (
-    AR1Forecaster,
-    EWMAForecaster,
-    HARForecaster,
-    HistoricalMeanForecaster,
-    NaiveForecaster,
+    AR1Model,
+    EWMAModel,
+    HARModel,
+    HistoricalMeanModel,
+    NaiveModel,
 )
 from rvol.forecasting.models.predictors import ConstantPredictor
 
@@ -43,11 +43,11 @@ def feature_sample(n: int = 45, seed: int = 19) -> pd.DataFrame:
 
 def all_models():
     return (
-        HistoricalMeanForecaster(),
-        NaiveForecaster(),
-        EWMAForecaster(),
-        AR1Forecaster(),
-        HARForecaster(),
+        HistoricalMeanModel(),
+        NaiveModel(),
+        EWMAModel(),
+        AR1Model(),
+        HARModel(),
     )
 
 
@@ -142,7 +142,7 @@ def test_completed_run_preserves_execution_settings_if_a_custom_policy_changes()
     schedule = MutableSchedule()
     strategy = WalkForwardSettings(RollingWindow(8), schedule, min_train_size=5)
     result = WalkForwardExperiment(
-        models=(HistoricalMeanForecaster(),),
+        models=(HistoricalMeanModel(),),
         config=ExperimentConfig(execution=replace(strategy, min_train_size=5)),
     ).run(feature_sample(18))
     schedule.interval = 6
@@ -156,12 +156,12 @@ def test_completed_run_preserves_execution_settings_if_a_custom_policy_changes()
 def test_experiment_rejects_duplicate_model_names_and_missing_features():
     with pytest.raises(ValueError, match="names must be unique"):
         WalkForwardExperiment(
-            models=(NaiveForecaster(), NaiveForecaster()),
+            models=(NaiveModel(), NaiveModel()),
             config=ExperimentConfig(execution=WalkForwardSettings()),
         )
 
     experiment = WalkForwardExperiment(
-        models=(HARForecaster(),),
+        models=(HARModel(),),
         config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=20)),
     )
     with pytest.raises(ValueError, match="rv_monthly"):
@@ -169,7 +169,7 @@ def test_experiment_rejects_duplicate_model_names_and_missing_features():
 
 
 def test_rolling_refits_use_exact_windows_and_record_the_last_actual_fit():
-    class RecordingMean(HistoricalMeanForecaster):
+    class RecordingMean(HistoricalMeanModel):
         def __init__(self) -> None:
             self.training_targets: list[FloatArray] = []
 
@@ -208,7 +208,7 @@ def test_rolling_refits_use_exact_windows_and_record_the_last_actual_fit():
         )
 
 
-@pytest.mark.parametrize("model", [HARForecaster(), AR1Forecaster(), NaiveForecaster()])
+@pytest.mark.parametrize("model", [HARModel(), AR1Model(), NaiveModel()])
 def test_cached_parameters_still_receive_fresh_features_between_refits(model):
     features = feature_sample(12)
     result = WalkForwardExperiment(
@@ -238,10 +238,10 @@ def test_cached_parameters_still_receive_fresh_features_between_refits(model):
 def test_ewma_updates_between_expanding_refits_match_daily_fitting():
     features = feature_sample()
     daily = WalkForwardExperiment(
-        (EWMAForecaster(),), ExperimentConfig(execution=WalkForwardSettings(min_train_size=5)),
+        (EWMAModel(),), ExperimentConfig(execution=WalkForwardSettings(min_train_size=5)),
     ).run(features)
     periodic = WalkForwardExperiment(
-        (EWMAForecaster(),),
+        (EWMAModel(),),
         ExperimentConfig(
             execution=WalkForwardSettings(retrain=EveryNSessions(5), min_train_size=5),
         ),
@@ -258,7 +258,7 @@ def test_ewma_updates_between_expanding_refits_match_daily_fitting():
 def test_rolling_ewma_resets_on_refit_and_updates_between_refits():
     features = feature_sample(18)
     result = WalkForwardExperiment(
-        (EWMAForecaster(decay=0.5),),
+        (EWMAModel(decay=0.5),),
         ExperimentConfig(
             execution=WalkForwardSettings(RollingWindow(8), EveryNSessions(3), min_train_size=5),
         ),
@@ -286,7 +286,7 @@ def test_updates_consume_only_newly_available_labels_including_empty_and_multiro
         "target": np.log([1.0, 4.0, 9.0, 16.0]),
     })
     result = WalkForwardExperiment(
-        (EWMAForecaster(decay=0.5),),
+        (EWMAModel(decay=0.5),),
         ExperimentConfig(
             execution=WalkForwardSettings(retrain=EveryNSessions(5), min_train_size=1),
         ),
@@ -348,7 +348,7 @@ def test_first_eligible_origin_always_initializes_the_models():
             return False
 
     result = WalkForwardExperiment(
-        (HistoricalMeanForecaster(),),
+        (HistoricalMeanModel(),),
         ExperimentConfig(
             execution=WalkForwardSettings(retrain=NoScheduledRefits(), min_train_size=5),
         ),

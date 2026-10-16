@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from rvol.domain.config import ExperimentConfig
-from rvol.domain.contracts import FittedForecaster, Forecaster, UpdatablePredictor
+from rvol.domain.contracts import ForecastModel, Predictor, UpdatablePredictor
 from rvol.domain.results import ExperimentResult, ForecastRecord
 from rvol.domain.settings import WalkForwardSettings
 from rvol.domain.specifications import ExecutionMetadata
@@ -33,7 +33,7 @@ class WalkForwardExperiment:
 
     def __init__(
         self,
-        models: Sequence[Forecaster],
+        models: Sequence[ForecastModel],
         config: ExperimentConfig,
     ) -> None:
         if not isinstance(config.execution, WalkForwardSettings):
@@ -112,7 +112,7 @@ class WalkForwardExperiment:
         # Start there, then consume every subsequent observation exactly once.
         first_step = max(index for index in range(first_output + 1) if plan[index].refit)
         records: list[ForecastRecord] = []
-        fitted_models: dict[str, FittedForecaster] = {}
+        fitted_models: dict[str, Predictor] = {}
         fit_step: _ExecutionStep | None = None
         last_available = 0
         for step in plan[first_step:]:

@@ -9,14 +9,15 @@ from rvol.domain import (
     ComponentSpecification,
     ExperimentConfig,
     ExperimentResult,
-    FittedForecaster,
-    Forecaster,
     ForecastMetric,
+    ForecastModel,
     ForecastRecord,
     HoldoutSettings,
+    Predictor,
     RollingWindow,
     WalkForwardSettings,
 )
+from rvol.domain.contracts import ForecastScale
 
 
 def assign_attribute(instance: object, name: str, value: object) -> None:
@@ -31,13 +32,13 @@ class MeanPredictor:
         return np.full(len(features), self.value, dtype="float64")
 
 
-class MeanForecaster:
+class MeanModel:
     name = "mean"
     feature_names: tuple[str, ...] = ()
 
     @property
     def specification(self) -> ComponentSpecification:
-        return ComponentSpecification(name=self.name, implementation="test.MeanForecaster")
+        return ComponentSpecification(name=self.name, implementation="test.MeanModel")
 
     def fit(self, features: np.ndarray, target: np.ndarray) -> MeanPredictor:
         return MeanPredictor(float(np.mean(target)))
@@ -45,7 +46,7 @@ class MeanForecaster:
 
 class SquaredError:
     name = "MSE"
-    scale = "log_variance"
+    scale: ForecastScale = "log_variance"
 
     def losses(self, actual: np.ndarray, predicted: np.ndarray) -> np.ndarray:
         return np.square(actual - predicted)
@@ -63,13 +64,10 @@ def sample_record(model: str = "HAR") -> ForecastRecord:
 
 
 def test_structural_contracts_accept_independent_implementations():
-    forecaster = MeanForecaster()
-    fitted = forecaster.fit(np.empty((3, 0)), np.array([-10.0, -9.0, -8.0]))
-    metric = SquaredError()
+    model: ForecastModel = MeanModel()
+    fitted: Predictor = model.fit(np.empty((3, 0)), np.array([-10.0, -9.0, -8.0]))
+    metric: ForecastMetric = SquaredError()
 
-    assert isinstance(forecaster, Forecaster)
-    assert isinstance(fitted, FittedForecaster)
-    assert isinstance(metric, ForecastMetric)
     assert np.allclose(fitted.predict(np.empty((2, 0))), -9.0)
     assert np.allclose(metric.losses(np.array([1.0]), np.array([0.5])), 0.25)
 

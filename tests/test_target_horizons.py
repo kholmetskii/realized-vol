@@ -20,14 +20,14 @@ from rvol.domain import (
 )
 from rvol.domain.contracts import FloatArray
 from rvol.forecasting.composition import standard_experiment
-from rvol.forecasting.evaluation import ForecastEvaluator
+from rvol.forecasting.evaluation import DieboldMarianoTest, ForecastEvaluator
 from rvol.forecasting.execution import (
     HoldoutExperiment,
     WalkForwardExperiment,
     prepare_forecast_data,
 )
 from rvol.forecasting.features import HARFeatureBuilder
-from rvol.forecasting.models import EWMAForecaster, HistoricalMeanForecaster
+from rvol.forecasting.models import EWMAModel, HistoricalMeanModel
 from rvol.forecasting.models.predictors import ConstantPredictor
 from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 from rvol.presentation.plotting.forecasting import plot_forecast_evaluation
@@ -84,7 +84,7 @@ def test_cumulative_targets_sum_variances_stably_rather_than_logs():
     np.testing.assert_allclose(features["target"], 1000 + np.log(3))
 
 
-class RecordingMean(HistoricalMeanForecaster):
+class RecordingMean(HistoricalMeanModel):
     def __init__(self) -> None:
         self.training_targets: list[FloatArray] = []
 
@@ -125,7 +125,7 @@ def test_holdout_ewma_waits_for_complete_labels_and_handles_delayed_reporting(ki
     features = prepared_sample(daily, horizon)
     cutoff = daily["date"].iloc[20].date()
     config = ExperimentConfig(execution=HoldoutSettings(cutoff, 8, update))
-    runner = HoldoutExperiment((EWMAForecaster(decay=0.5),), config)
+    runner = HoldoutExperiment((EWMAModel(decay=0.5),), config)
     full = runner.run(features)
     state = None
     consumed = 0
@@ -140,7 +140,7 @@ def test_holdout_ewma_waits_for_complete_labels_and_handles_delayed_reporting(ki
         assert record.n_train == len(features[features.target_date <= pd.Timestamp(cutoff)])
 
     bounded_config = replace(config, forecast_start=full.records[7].target_date)
-    bounded = HoldoutExperiment((EWMAForecaster(decay=0.5),), bounded_config).run(features)
+    bounded = HoldoutExperiment((EWMAModel(decay=0.5),), bounded_config).run(features)
     assert bounded.records == full.records[7:]
 
 
@@ -236,7 +236,7 @@ def test_executors_reject_ambiguous_or_invalid_prepared_targets(corruption):
             0, "origin_date" if corruption == "reversed" else "target_date"
         ]
     with pytest.raises(ValueError):
-        WalkForwardExperiment((HistoricalMeanForecaster(),), ExperimentConfig(
+        WalkForwardExperiment((HistoricalMeanModel(),), ExperimentConfig(
             execution=WalkForwardSettings(min_train_size=5),
         )).run(features)
 
@@ -269,7 +269,10 @@ def test_default_comparison_accounts_for_horizon_and_explicit_lags_remain_config
     direct = ForecastEvaluator(comparison_pairs=workflow.comparison_pairs).evaluate(experiment)
     assert direct == evaluation
     assert {dict(item.test_parameters)["hac_lags"] for item in evaluation.comparisons} == {4}
-    overridden = workflow.evaluator(hac_lags=0).evaluate(experiment)
+    explicit = replace(
+        workflow, comparison_test=DieboldMarianoTest(hac_lags=0, min_hac_lags=4),
+    )
+    overridden = explicit.evaluator().evaluate(experiment)
     assert {dict(item.test_parameters)["hac_lags"] for item in overridden.comparisons} == {0}
 
 

@@ -12,7 +12,7 @@ from rvol.domain import (
     ExecutionMetadata,
     ExperimentConfig,
     ExperimentResult,
-    Forecaster,
+    ForecastModel,
     ForecastRecord,
     HoldoutSettings,
     UpdatablePredictor,
@@ -29,7 +29,7 @@ class HoldoutExperiment:
     """
 
     def __init__(
-        self, models: Sequence[Forecaster], config: ExperimentConfig,
+        self, models: Sequence[ForecastModel], config: ExperimentConfig,
     ) -> None:
         if not isinstance(config.execution, HoldoutSettings):
             raise TypeError("holdout execution requires HoldoutSettings")

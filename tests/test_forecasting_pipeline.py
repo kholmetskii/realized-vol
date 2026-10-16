@@ -13,7 +13,7 @@ from rvol.domain import ExperimentConfig, WalkForwardSettings
 from rvol.forecasting.evaluation import ForecastEvaluator
 from rvol.forecasting.execution import WalkForwardExperiment, prepare_forecast_data
 from rvol.forecasting.features import build_har_features
-from rvol.forecasting.models import HARForecaster, NaiveForecaster
+from rvol.forecasting.models import HARModel, NaiveModel
 from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 
 
@@ -37,7 +37,7 @@ def characterized_pipeline():
         build_har_features(daily), RealizedVarianceTargetBuilder()(daily),
     )
     experiment = WalkForwardExperiment(
-        models=(NaiveForecaster(), HARForecaster()),
+        models=(NaiveModel(), HARModel()),
         config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=25)),
     ).run(features)
     evaluation = ForecastEvaluator(

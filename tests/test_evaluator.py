@@ -11,17 +11,16 @@ from rvol.domain import (
     ComponentSpecification,
     ExperimentConfig,
     ExperimentResult,
-    ForecastComparisonTest,
     WalkForwardSettings,
 )
 from rvol.forecasting.evaluation import ForecastEvaluator, ModelLossSummary
 from rvol.forecasting.execution import WalkForwardExperiment
 from rvol.forecasting.models import (
-    AR1Forecaster,
-    EWMAForecaster,
-    HARForecaster,
-    HistoricalMeanForecaster,
-    NaiveForecaster,
+    AR1Model,
+    EWMAModel,
+    HARModel,
+    HistoricalMeanModel,
+    NaiveModel,
 )
 
 
@@ -47,11 +46,11 @@ def experiment_result(
 ) -> ExperimentResult:
     experiment = WalkForwardExperiment(
         models=(
-            HistoricalMeanForecaster(),
-            NaiveForecaster(),
-            EWMAForecaster(),
-            AR1Forecaster(),
-            HARForecaster(),
+            HistoricalMeanModel(),
+            NaiveModel(),
+            EWMAModel(),
+            AR1Model(),
+            HARModel(),
         ),
         config=ExperimentConfig(
             execution=WalkForwardSettings(min_train_size=20),
@@ -164,7 +163,6 @@ def test_evaluator_uses_an_independent_comparison_test_and_preserves_loss_vector
             return ComparisonOutcome(12.0, 0.2, (("replications", 17),))
 
     test = CustomTest()
-    assert isinstance(test, ForecastComparisonTest)
     evaluator = ForecastEvaluator(comparison_pairs=(("naive", "HAR"),), comparison_test=test)
     result = evaluator.evaluate(experiment_result())
     reference = ForecastEvaluator().evaluate(experiment_result())

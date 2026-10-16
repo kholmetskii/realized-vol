@@ -57,7 +57,7 @@ class EWMAPredictor:
 
 
 @dataclass(frozen=True)
-class EWMAForecaster:
+class EWMAModel:
     """Forecast variance with a fixed-decay RiskMetrics-style EWMA.
 
     Training targets are log realized variances. The recursion is evaluated in

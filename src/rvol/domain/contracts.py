@@ -18,11 +18,10 @@ ForecastScale = Literal["log_variance", "variance"]
 Dataset = TypeVar("Dataset")
 
 
-@runtime_checkable
-class FittedForecaster(Protocol):
+class Predictor(Protocol):
     """A fitted model returning forecasts in the canonical log-variance scale.
 
-    Predictions use the feature order declared by the originating forecaster.
+    Predictions use the feature order declared by the originating model.
     Log variance is the output representation, not necessarily the statistical
     target: log(mean variance) and mean(log variance) are different forecasts.
     Each model documents which quantity its fitting procedure estimates.
@@ -38,7 +37,7 @@ class FittedForecaster(Protocol):
 
 
 @runtime_checkable
-class UpdatablePredictor(FittedForecaster, Protocol):
+class UpdatablePredictor(Predictor, Protocol):
     """A fitted predictor that can consume new observations between fits."""
 
     def update(self, features: FloatArray, target: FloatArray) -> Self:
@@ -53,7 +52,6 @@ class UpdatablePredictor(FittedForecaster, Protocol):
         ...
 
 
-@runtime_checkable
 class TrainingWindowPolicy(Protocol):
     """Select a contiguous window from chronological, already eligible rows."""
 
@@ -70,7 +68,6 @@ class TrainingWindowPolicy(Protocol):
         ...
 
 
-@runtime_checkable
 class RefitSchedule(Protocol):
     """Decide when to fit using the dataset's eligible forecast-origin index."""
 
@@ -86,9 +83,8 @@ class RefitSchedule(Protocol):
         ...
 
 
-@runtime_checkable
-class Forecaster(Protocol):
-    """Fit a forecasting strategy using numerical arrays without mutating them.
+class ForecastModel(Protocol):
+    """Fit a forecasting model using numerical arrays without mutating them.
 
     Features have shape (n_rows, n_features), with columns in feature_names
     order. Targets have shape (n_rows,) and contain observed log realized
@@ -106,12 +102,11 @@ class Forecaster(Protocol):
         """Describe this configured model, including its actual parameter values."""
         ...
 
-    def fit(self, features: FloatArray, target: FloatArray) -> FittedForecaster:
+    def fit(self, features: FloatArray, target: FloatArray) -> Predictor:
         """Fit aligned training rows and return a log-variance predictor."""
         ...
 
 
-@runtime_checkable
 class ForecastMetric(Protocol):
     """A per-observation loss metric on one declared forecast scale."""
 
@@ -124,7 +119,6 @@ class ForecastMetric(Protocol):
     def losses(self, actual: FloatArray, predicted: FloatArray) -> FloatArray: ...
 
 
-@runtime_checkable
 class ForecastComparisonTest(Protocol):
     """Test whether the candidate's expected loss is lower on aligned targets.
 
@@ -140,7 +134,6 @@ class ForecastComparisonTest(Protocol):
     ) -> ComparisonOutcome: ...
 
 
-@runtime_checkable
 class FeatureBuilder(Protocol[Dataset]):
     """Build past-only inputs keyed by origin, without future outcome columns."""
 
@@ -150,7 +143,6 @@ class FeatureBuilder(Protocol[Dataset]):
     def __call__(self, daily: Dataset) -> Dataset: ...
 
 
-@runtime_checkable
 class TargetBuilder(Protocol[Dataset]):
     """Build log-variance labels on the full observed session timeline.
 

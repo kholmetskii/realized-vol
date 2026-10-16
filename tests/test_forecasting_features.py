@@ -83,7 +83,7 @@ def test_large_gap_is_rejected_before_rolling_features_are_built():
 
 def test_configured_builder_uses_the_windows_and_columns_it_describes():
     daily = daily_sample(8).rename(columns={"date": "session", "log_rv": "value"})
-    builder = HARFeatureBuilder(
+    builder: FeatureBuilder[pd.DataFrame] = HARFeatureBuilder(
         date_col="session", rv_col="value", weekly_window=2,
         monthly_window=4, max_gap_days=None,
     )
@@ -91,7 +91,6 @@ def test_configured_builder_uses_the_windows_and_columns_it_describes():
     features = builder(daily)
     settings = dict(builder.specification.parameters)
 
-    assert isinstance(builder, FeatureBuilder)
     assert settings == {
         "date_col": "session", "rv_col": "value", "weekly_window": 2,
         "monthly_window": 4, "max_gap_days": None,

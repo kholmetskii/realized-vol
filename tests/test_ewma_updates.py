@@ -4,18 +4,18 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from rvol.domain import FittedForecaster, UpdatablePredictor
+from rvol.domain import ForecastModel, Predictor, UpdatablePredictor
 from rvol.forecasting.models import (
-    AR1Forecaster,
-    EWMAForecaster,
-    HARForecaster,
-    HistoricalMeanForecaster,
-    NaiveForecaster,
+    AR1Model,
+    EWMAModel,
+    HARModel,
+    HistoricalMeanModel,
+    NaiveModel,
 )
 
 
 def test_ewma_update_consumes_new_variance_without_changing_previous_state_or_inputs():
-    fitted: UpdatablePredictor = EWMAForecaster(decay=0.5).fit(
+    fitted: UpdatablePredictor = EWMAModel(decay=0.5).fit(
         np.empty((2, 0)), np.log([1.0, 4.0]),
     )
     features = np.empty((1, 0))
@@ -25,7 +25,6 @@ def test_ewma_update_consumes_new_variance_without_changing_previous_state_or_in
 
     updated = fitted.update(features, target)
 
-    assert isinstance(updated, FittedForecaster)
     assert isinstance(updated, UpdatablePredictor)
     np.testing.assert_allclose(fitted.predict(np.empty((2, 0))), np.log([2.5, 2.5]))
     np.testing.assert_allclose(updated.predict(np.empty((2, 0))), np.log([5.75, 5.75]))
@@ -37,7 +36,7 @@ def test_ewma_update_consumes_new_variance_without_changing_previous_state_or_in
 
 @pytest.mark.parametrize("decay", [0.5, 0.94, 0.99])
 def test_single_and_batch_updates_match_fitting_the_complete_observation_history(decay):
-    model = EWMAForecaster(decay=decay)
+    model = EWMAModel(decay=decay)
     target = np.random.default_rng(43).normal(-10.0, 0.5, size=30)
     prefix = model.fit(np.empty((3, 0)), target[:3])
     single = prefix
@@ -54,7 +53,7 @@ def test_single_and_batch_updates_match_fitting_the_complete_observation_history
 
 
 def test_an_empty_update_preserves_the_fitted_state():
-    fitted = EWMAForecaster().fit(np.empty((1, 0)), np.array([-10.0]))
+    fitted = EWMAModel().fit(np.empty((1, 0)), np.array([-10.0]))
 
     assert fitted.update(np.empty((0, 0)), np.empty(0)) is fitted
 
@@ -71,14 +70,14 @@ def test_an_empty_update_preserves_the_fitted_state():
     ],
 )
 def test_updates_validate_alignment_shapes_and_finite_targets(features, target, message):
-    fitted = EWMAForecaster().fit(np.empty((1, 0)), np.array([-10.0]))
+    fitted = EWMAModel().fit(np.empty((1, 0)), np.array([-10.0]))
 
     with pytest.raises(ValueError, match=message):
         fitted.update(features, target)
 
 
 def test_updates_remain_stable_for_widely_separated_log_variances():
-    model = EWMAForecaster(decay=0.5)
+    model = EWMAModel(decay=0.5)
     target = np.array([-700.0, 700.0, -700.0, 700.0])
 
     with np.errstate(over="raise", invalid="raise"):
@@ -92,10 +91,11 @@ def test_updates_remain_stable_for_widely_separated_log_variances():
 
 
 @pytest.mark.parametrize(
-    "model", [HistoricalMeanForecaster(), NaiveForecaster(), AR1Forecaster(), HARForecaster()],
+    "model", [HistoricalMeanModel(), NaiveModel(), AR1Model(), HARModel()],
 )
-def test_observation_updates_are_optional_for_other_fitted_models(model):
-    fitted = model.fit(np.zeros((4, len(model.feature_names))), np.log([1.0, 2.0, 3.0, 4.0]))
+def test_observation_updates_are_optional_for_other_fitted_models(model: ForecastModel):
+    fitted: Predictor = model.fit(
+        np.zeros((4, len(model.feature_names))), np.log([1.0, 2.0, 3.0, 4.0]),
+    )
 
-    assert isinstance(fitted, FittedForecaster)
     assert not isinstance(fitted, UpdatablePredictor)

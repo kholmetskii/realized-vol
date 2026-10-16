@@ -12,7 +12,7 @@ from rvol.forecasting.models.linear import LinearPredictor, fit_ols
 HAR_FEATURES = ("rv_daily", "rv_weekly", "rv_monthly")
 
 
-class HARForecaster:
+class HARModel:
     """Fit log HAR-RV by OLS and apply Duan's training-residual correction.
 
     Return the log of the variance-scale forecast: the OLS log prediction plus

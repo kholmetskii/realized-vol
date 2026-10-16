@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-from rvol.domain.contracts import Forecaster
+from rvol.domain.contracts import ForecastModel
 from rvol.domain.targets import TargetHorizon
 
 
@@ -33,16 +33,16 @@ def target_horizon(features: pd.DataFrame) -> TargetHorizon:
     return TargetHorizon(int(sessions), values["target_kind"].iloc[0])
 
 
-def validated_models(models: Sequence[Forecaster]) -> tuple[Forecaster, ...]:
+def validated_models(models: Sequence[ForecastModel]) -> tuple[ForecastModel, ...]:
     if not models:
-        raise ValueError("at least one forecaster is required")
+        raise ValueError("at least one model is required")
     names = [model.name for model in models]
     if len(names) != len(set(names)):
-        raise ValueError("forecaster names must be unique")
+        raise ValueError("model names must be unique")
     return tuple(models)
 
 
-def validated_features(features: pd.DataFrame, models: Sequence[Forecaster]) -> pd.DataFrame:
+def validated_features(features: pd.DataFrame, models: Sequence[ForecastModel]) -> pd.DataFrame:
     horizon = target_horizon(features)
     model_features = {
         feature_name

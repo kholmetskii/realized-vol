@@ -12,7 +12,6 @@ from rvol.domain import (
     TargetHorizon,
     WalkForwardSettings,
 )
-from rvol.forecasting.composition import standard_diagnostic_checks
 from rvol.forecasting.evaluation import (
     DiagnosticCheck,
     DiagnosticResult,
@@ -26,11 +25,11 @@ from rvol.forecasting.evaluation import (
 )
 from rvol.forecasting.execution import WalkForwardExperiment
 from rvol.forecasting.models import (
-    AR1Forecaster,
-    EWMAForecaster,
-    HARForecaster,
-    HistoricalMeanForecaster,
-    NaiveForecaster,
+    AR1Model,
+    EWMAModel,
+    HARModel,
+    HistoricalMeanModel,
+    NaiveModel,
 )
 from rvol.presentation.reporting import RobustnessArtifactWriter
 
@@ -47,15 +46,17 @@ def experiment_result():
         "target": target,
     })
     return WalkForwardExperiment(
-        models=(HistoricalMeanForecaster(), NaiveForecaster(), EWMAForecaster(),
-                AR1Forecaster(), HARForecaster()),
+        models=(HistoricalMeanModel(), NaiveModel(), EWMAModel(),
+                AR1Model(), HARModel()),
         config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=20)),
     ).run(features)
 
 
 def analyzer():
     return ForecastRobustnessAnalyzer(
-        checks=standard_diagnostic_checks(hac_lags=(0, 1), top_errors=2),
+        checks=(
+            LagSensitivityCheck((0, 1)), WinRateCheck(), MonthlyLossCheck(), LargestErrorsCheck(2),
+        ),
         candidate_model="HAR", baseline_models=("naive", "EWMA", "AR1", "historical_mean"),
     )
 
@@ -190,8 +191,7 @@ def test_independent_diagnostic_can_be_injected_and_rendered_without_writer_chan
                 ((context.experiment.n_forecasts,),), (("Count", "{count}"),),
             )
 
-    check = CountCheck()
-    assert isinstance(check, DiagnosticCheck)
+    check: DiagnosticCheck = CountCheck()
     result = ForecastRobustnessAnalyzer(checks=(check,)).analyze(experiment_result())
     paths = RobustnessArtifactWriter(tmp_path).write(result)
 
@@ -217,8 +217,6 @@ def test_diagnostic_selection_rejects_empty_and_duplicate_checks():
         ForecastRobustnessAnalyzer(checks=())
     with pytest.raises(ValueError, match="unique"):
         ForecastRobustnessAnalyzer(checks=(MonthlyLossCheck(), MonthlyLossCheck()))
-    with pytest.raises(ValueError, match="unknown"):
-        standard_diagnostic_checks(("missing",))
 
 
 def test_comparison_diagnostics_validate_their_required_model_references():

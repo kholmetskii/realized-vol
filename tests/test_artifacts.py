@@ -17,9 +17,9 @@ from rvol.domain import (
     WalkForwardSettings,
 )
 from rvol.forecasting.composition import standard_experiment
-from rvol.forecasting.evaluation import ForecastEvaluator
+from rvol.forecasting.evaluation import DieboldMarianoTest, ForecastEvaluator
 from rvol.forecasting.features import HARFeatureBuilder
-from rvol.forecasting.models import EWMAForecaster, HARForecaster
+from rvol.forecasting.models import EWMAModel, HARModel
 from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 from rvol.presentation.reporting import DatasetSnapshot, ForecastArtifactWriter
 
@@ -41,7 +41,7 @@ def configured_run(tmp_path):
     )
     workflow = replace(
         standard_experiment(config),
-        models=(EWMAForecaster(decay=0.8), HARForecaster()),
+        models=(EWMAModel(decay=0.8), HARModel()),
         feature_builder=HARFeatureBuilder(
             date_col="session", rv_col="value", weekly_window=2,
             monthly_window=4, max_gap_days=None,
@@ -49,10 +49,11 @@ def configured_run(tmp_path):
         target_builder=RealizedVarianceTargetBuilder(date_col="session", rv_col="value"),
         comparison_pairs=(("EWMA", "HAR"),),
         baseline_models=("EWMA",),
+        comparison_test=DieboldMarianoTest(hac_lags=0),
     )
     specification = workflow.specification
     experiment = workflow.run(daily)
-    evaluation = workflow.evaluator(hac_lags=0).evaluate(experiment)
+    evaluation = workflow.evaluator().evaluate(experiment)
     snapshot = DatasetSnapshot.from_frame(source, daily, date_column="session")
     return experiment, evaluation, config, specification, snapshot
 
@@ -113,9 +114,9 @@ def test_artifacts_record_nondefault_settings_and_remain_deterministic(tmp_path,
     }
     models = metadata["specification"]["models"]
     assert [model["name"] for model in models] == ["EWMA", "HAR"]
-    assert models[0]["implementation"] == "rvol.forecasting.models.ewma.EWMAForecaster"
+    assert models[0]["implementation"] == "rvol.forecasting.models.ewma.EWMAModel"
     assert models[0]["parameters"] == {"decay": 0.8}
-    assert models[1]["implementation"] == "rvol.forecasting.models.har.HARForecaster"
+    assert models[1]["implementation"] == "rvol.forecasting.models.har.HARModel"
     assert models[1]["parameters"] == {"variance_correction": "duan_smearing"}
     assert "intercept" not in models[1]["parameters"]  # Fitted estimates are not configuration.
 

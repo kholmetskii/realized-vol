@@ -10,7 +10,7 @@ from rvol.forecasting.models._validation import validated_training_data
 from rvol.forecasting.models.predictors import ConstantPredictor
 
 
-class HistoricalMeanForecaster:
+class HistoricalMeanModel:
     """Predict the mean log RV observed in the training sample.
 
     Exponentiating gives the geometric mean of past realized variances.

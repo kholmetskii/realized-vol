@@ -7,7 +7,7 @@ from rvol.domain.specifications import ComponentSpecification
 from rvol.forecasting.models.linear import LinearPredictor, fit_ols
 
 
-class AR1Forecaster:
+class AR1Model:
     """Regress next-session log RV on current-session log RV.
 
     Return the OLS estimate of mean log variance. Exponentiating gives a

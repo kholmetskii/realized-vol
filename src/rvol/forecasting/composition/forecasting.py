@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field
 
 import pandas as pd
 
@@ -12,7 +11,7 @@ from rvol.domain import (
     ExperimentResult,
     ExperimentSpecification,
     FeatureBuilder,
-    Forecaster,
+    ForecastModel,
     HoldoutSettings,
     TargetBuilder,
     TargetHorizon,
@@ -39,33 +38,13 @@ from rvol.forecasting.execution import (
 )
 from rvol.forecasting.features import HARFeatureBuilder
 from rvol.forecasting.models import (
-    AR1Forecaster,
-    EWMAForecaster,
-    HARForecaster,
-    HistoricalMeanForecaster,
-    NaiveForecaster,
+    AR1Model,
+    EWMAModel,
+    HARModel,
+    HistoricalMeanModel,
+    NaiveModel,
 )
 from rvol.forecasting.targets import RealizedVarianceTargetBuilder
-
-ROBUSTNESS_CHECK_NAMES = ("hac_sensitivity", "win_rates", "monthly_losses", "largest_errors")
-
-
-def standard_diagnostic_checks(
-    names: Sequence[str] | None = None, *,
-    hac_lags: Sequence[int] = tuple(range(6)), top_errors: int = 5,
-) -> tuple[DiagnosticCheck, ...]:
-    selected = ROBUSTNESS_CHECK_NAMES if names is None else tuple(names)
-    if not selected or len(set(selected)) != len(selected):
-        raise ValueError("diagnostic check names must be non-empty and unique")
-    factories: dict[str, Callable[[], DiagnosticCheck]] = {
-        "hac_sensitivity": lambda: LagSensitivityCheck(tuple(hac_lags)),
-        "win_rates": WinRateCheck,
-        "monthly_losses": MonthlyLossCheck,
-        "largest_errors": lambda: LargestErrorsCheck(top_errors),
-    }
-    if set(selected).difference(factories):
-        raise ValueError("unknown diagnostic check")
-    return tuple(factories[name]() for name in selected)
 
 
 @dataclass(frozen=True)
@@ -77,7 +56,7 @@ class Experiment:
     """
 
     config: ExperimentConfig
-    models: tuple[Forecaster, ...]
+    models: tuple[ForecastModel, ...]
     feature_builder: FeatureBuilder[pd.DataFrame]
     target_builder: TargetBuilder[pd.DataFrame]
     metrics: tuple[ForecastMetric, ...]
@@ -86,7 +65,9 @@ class Experiment:
     baseline_models: tuple[str, ...]
     comparison_test: ForecastComparisonTest = field(default_factory=DieboldMarianoTest)
     diagnostic_checks: tuple[DiagnosticCheck, ...] = field(
-        default_factory=standard_diagnostic_checks,
+        default_factory=lambda: (
+            LagSensitivityCheck(), WinRateCheck(), MonthlyLossCheck(), LargestErrorsCheck(),
+        ),
     )
     plot_metric: str | None = None
 
@@ -151,47 +132,18 @@ class Experiment:
             executor = WalkForwardExperiment(self.models, self.config)
         return executor.run(self.prepare(daily))
 
-    def evaluator(
-        self,
-        *,
-        comparison_pairs: Sequence[tuple[str, str]] | None = None,
-        hac_lags: int | None = None,
-    ) -> ForecastEvaluator:
-        """Build an evaluator with defaults or explicit comparison overrides."""
-        test = self.comparison_test
-        if hac_lags is not None:
-            if not isinstance(test, DieboldMarianoTest):
-                raise ValueError(
-                    "hac_lags requires a DieboldMarianoTest; configure your test directly"
-                )
-            test = replace(test, hac_lags=hac_lags)
+    def evaluator(self) -> ForecastEvaluator:
+        """Build an evaluator from the experiment's metrics and comparison settings."""
         return ForecastEvaluator(
             metrics=self.metrics,
-            comparison_pairs=(
-                self.comparison_pairs if comparison_pairs is None else comparison_pairs
-            ),
-            comparison_test=test,
+            comparison_pairs=self.comparison_pairs,
+            comparison_test=self.comparison_test,
         )
 
-    def robustness_analyzer(
-        self,
-        *,
-        hac_lags: Sequence[int] | None = None,
-        top_errors: int | None = None,
-        checks: Sequence[DiagnosticCheck] | None = None,
-    ) -> ForecastRobustnessAnalyzer:
-        """Build robustness checks for the configured candidate and baselines."""
-        if checks is not None and (hac_lags is not None or top_errors is not None):
-            raise ValueError("configure settings on the injected diagnostic checks")
-        if checks is None:
-            checks = self.diagnostic_checks
-            if hac_lags is not None or top_errors is not None:
-                checks = standard_diagnostic_checks(
-                    hac_lags=tuple(range(6)) if hac_lags is None else hac_lags,
-                    top_errors=5 if top_errors is None else top_errors,
-                )
+    def robustness_analyzer(self) -> ForecastRobustnessAnalyzer:
+        """Build an analyzer from the experiment's checks, candidate and baselines."""
         return ForecastRobustnessAnalyzer(
-            checks=checks,
+            checks=self.diagnostic_checks,
             candidate_model=self.candidate_model,
             baseline_models=self.baseline_models,
             metrics=self.metrics,
@@ -240,17 +192,17 @@ class Experiment:
         }
 
 
-def standard_forecasters(*, target_horizon: TargetHorizon | None = None) -> tuple[Forecaster, ...]:
+def standard_models(*, target_horizon: TargetHorizon | None = None) -> tuple[ForecastModel, ...]:
     """Return fresh instances of the models used by standard project workflows."""
     horizon = TargetHorizon() if target_horizon is None else target_horizon
     return (
-        HistoricalMeanForecaster(),
-        NaiveForecaster(
+        HistoricalMeanModel(),
+        NaiveModel(
             variance_multiplier=float(horizon.sessions) if horizon.kind == "cumulative" else 1.0,
         ),
-        EWMAForecaster(),
-        AR1Forecaster(),
-        HARForecaster(),
+        EWMAModel(),
+        AR1Model(),
+        HARModel(),
     )
 
 
@@ -262,7 +214,7 @@ def standard_experiment(
     horizon = TargetHorizon() if target_horizon is None else target_horizon
     return Experiment(
         config=ExperimentConfig(execution=WalkForwardSettings()) if config is None else config,
-        models=standard_forecasters(target_horizon=horizon),
+        models=standard_models(target_horizon=horizon),
         feature_builder=HARFeatureBuilder(),
         target_builder=RealizedVarianceTargetBuilder(horizon),
         metrics=(QLikeMetric(), LogMSEMetric()),

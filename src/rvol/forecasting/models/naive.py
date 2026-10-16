@@ -13,7 +13,7 @@ from rvol.forecasting.models.predictors import FeatureColumnPredictor
 
 
 @dataclass(frozen=True)
-class NaiveForecaster:
+class NaiveModel:
     """Persist current variance, with an explicit variance-scale multiplier."""
 
     variance_multiplier: float = 1.0

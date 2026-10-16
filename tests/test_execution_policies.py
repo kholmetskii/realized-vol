@@ -32,7 +32,6 @@ def test_windows_select_only_the_available_chronological_history(
 
     selected = history[window.select(n_available)]
 
-    assert isinstance(window, TrainingWindowPolicy)
     assert selected == expected
     assert history == list(range(10))
 
@@ -46,9 +45,8 @@ def test_rolling_window_counts_observations_across_calendar_gaps():
 
 
 def test_refit_schedule_keeps_its_first_eligible_origin_anchor():
-    schedule = EveryNSessions(5)
+    schedule: RefitSchedule = EveryNSessions(5)
 
-    assert isinstance(schedule, RefitSchedule)
     assert [index for index in range(15) if schedule.should_refit(index)] == [0, 5, 10]
     # A later reporting range continues to use the full dataset's origin indices.
     assert [index for index in range(7, 14) if schedule.should_refit(index)] == [10]

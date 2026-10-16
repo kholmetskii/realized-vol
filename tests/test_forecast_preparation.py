@@ -14,7 +14,7 @@ from rvol.domain import (
 from rvol.forecasting.composition import standard_experiment
 from rvol.forecasting.execution import prepare_forecast_data
 from rvol.forecasting.features import HARFeatureBuilder
-from rvol.forecasting.models import HistoricalMeanForecaster
+from rvol.forecasting.models import HistoricalMeanModel
 from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 
 
@@ -28,11 +28,12 @@ def daily_sample(n: int = 16) -> pd.DataFrame:
 def test_target_builder_labels_the_full_timeline_without_feature_warmup(kind, sessions):
     daily = daily_sample().sample(frac=1, random_state=42)
     unchanged = daily.copy(deep=True)
-    builder = RealizedVarianceTargetBuilder(TargetHorizon(sessions, kind))
+    builder: TargetBuilder[pd.DataFrame] = RealizedVarianceTargetBuilder(
+        TargetHorizon(sessions, kind),
+    )
     targets = builder(daily)
     ordered = daily.sort_values("date").reset_index(drop=True)
 
-    assert isinstance(builder, TargetBuilder)
     assert len(targets) == len(daily)
     assert list(targets.columns) == [
         "origin_date", "target_date", "target", "target_start_date",
@@ -112,7 +113,7 @@ def test_experiment_can_inject_an_independent_target_builder_and_feature_family(
             ExperimentConfig(execution=WalkForwardSettings(min_train_size=2)),
             target_horizon=horizon,
         ),
-        models=(HistoricalMeanForecaster(),), feature_builder=SparseFeatures(),
+        models=(HistoricalMeanModel(),), feature_builder=SparseFeatures(),
         target_builder=OtherTargets(), comparison_pairs=(),
         candidate_model="historical_mean", baseline_models=(),
     )
@@ -123,7 +124,6 @@ def test_experiment_can_inject_an_independent_target_builder_and_feature_family(
 
     assert workflow.specification.features.name == "sparse"
     assert workflow.specification.target.name == "other"
-    assert isinstance(workflow.target_builder, TargetBuilder)
     assert result.target_horizon == horizon
     assert result.records
     for record in result.records:

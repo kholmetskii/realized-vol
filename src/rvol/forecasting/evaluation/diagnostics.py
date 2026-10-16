@@ -6,7 +6,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from rvol.domain import ComponentSpecification, ExperimentResult, ForecastMetric
 from rvol.forecasting.evaluation.evaluator import EvaluationResult
@@ -71,7 +71,6 @@ class DiagnosticResult:
         return tuple(dict(zip(self.columns, row, strict=True)) for row in self.rows)
 
 
-@runtime_checkable
 class DiagnosticCheck(Protocol):
     @property
     def specification(self) -> ComponentSpecification: ...

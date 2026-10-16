@@ -9,11 +9,11 @@ from rvol.domain import (
     ExecutionSpecification,
     ExperimentSpecification,
 )
-from rvol.forecasting.models import EWMAForecaster
+from rvol.forecasting.models import EWMAModel
 
 
 def test_parameter_snapshots_are_immutable_and_describe_the_configured_model():
-    model = EWMAForecaster(decay=0.8)
+    model = EWMAModel(decay=0.8)
     original = model.specification
     changed = replace(model, decay=0.9).specification
 
