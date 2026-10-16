@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -10,13 +10,13 @@ from rvol.domain import (
     ComponentSpecification,
     EveryNSessions,
     ExecutionMetadata,
-    ExecutionSpecification,
     ExperimentConfig,
+    HoldoutSettings,
     RollingWindow,
     RunIdentity,
     WalkForwardSettings,
 )
-from rvol.forecasting.composition import standard_experiment_definition
+from rvol.forecasting.composition import standard_experiment
 from rvol.forecasting.evaluation import ForecastEvaluator
 from rvol.forecasting.features import HARFeatureBuilder
 from rvol.forecasting.models import EWMAForecaster, HARForecaster
@@ -34,8 +34,13 @@ def configured_run(tmp_path):
     })
     source = tmp_path / "daily.parquet"
     daily.to_parquet(source, index=False)
-    definition = replace(
-        standard_experiment_definition(),
+    config = ExperimentConfig(
+        execution=WalkForwardSettings(RollingWindow(12), EveryNSessions(3), min_train_size=10),
+        forecast_start=dates[22].date(),
+        forecast_end=dates[30].date(),
+    )
+    workflow = replace(
+        standard_experiment(config),
         models=(EWMAForecaster(decay=0.8), HARForecaster()),
         feature_builder=HARFeatureBuilder(
             date_col="session", rv_col="value", weekly_window=2,
@@ -45,14 +50,9 @@ def configured_run(tmp_path):
         comparison_pairs=(("EWMA", "HAR"),),
         baseline_models=("EWMA",),
     )
-    config = ExperimentConfig(
-        execution=WalkForwardSettings(RollingWindow(12), EveryNSessions(3), min_train_size=10),
-        forecast_start=dates[22].date(),
-        forecast_end=dates[30].date(),
-    )
-    specification = definition.specification
-    experiment = definition.run(daily, config)
-    evaluation = definition.evaluator(hac_lags=0).evaluate(experiment)
+    specification = workflow.specification
+    experiment = workflow.run(daily)
+    evaluation = workflow.evaluator(hac_lags=0).evaluate(experiment)
     snapshot = DatasetSnapshot.from_frame(source, daily, date_column="session")
     return experiment, evaluation, config, specification, snapshot
 
@@ -203,17 +203,7 @@ def test_writer_exports_independent_executor_metadata_without_walk_forward_rules
 ):
     experiment, evaluation, config, specification, snapshot = configured_run
 
-    @dataclass(frozen=True)
-    class CustomSettings:
-        batches: int = 2
-
-        @property
-        def specification(self) -> ExecutionSpecification:
-            return ExecutionSpecification(ComponentSpecification(
-                "custom", "test.CustomSettings", parameters=(("batches", self.batches),),
-            ))
-
-    custom_config = replace(config, execution=CustomSettings())
+    custom_config = replace(config, execution=HoldoutSettings(snapshot.start_date))
     metadata = ExecutionMetadata(
         executor="test.CustomExecutor", settings=custom_config.execution.specification,
         facts=(("completed_batches", 2),),
@@ -225,7 +215,10 @@ def test_writer_exports_independent_executor_metadata_without_walk_forward_rules
 
     exported = json.loads(paths.experiment.read_text())["execution"]
     assert exported["executor"] == "test.CustomExecutor"
-    assert exported["settings"]["parameters"] == {"batches": 2}
+    assert exported["settings"]["parameters"] == {
+        "train_end": snapshot.start_date.isoformat(), "min_train_size": 252,
+        "update_observations": False,
+    }
     assert exported["policies"] == {}
     assert exported["facts"] == {"completed_batches": 2}
 

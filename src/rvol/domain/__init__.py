@@ -3,10 +3,6 @@
 from rvol.domain.comparisons import ComparisonOutcome
 from rvol.domain.config import ExperimentConfig
 from rvol.domain.contracts import (
-    DatasetRepository,
-    DescribedExecutionSettings,
-    ExperimentExecutor,
-    ExperimentExecutorFactory,
     FeatureBuilder,
     FittedForecaster,
     ForecastComparisonTest,
@@ -36,15 +32,11 @@ from rvol.domain.targets import TargetHorizon
 __all__ = [
     "ComponentSpecification",
     "ComparisonOutcome",
-    "DatasetRepository",
-    "DescribedExecutionSettings",
     "EveryNSessions",
     "ExecutionMetadata",
     "ExecutionSpecification",
     "ExpandingWindow",
     "ExperimentConfig",
-    "ExperimentExecutor",
-    "ExperimentExecutorFactory",
     "ExperimentResult",
     "ExperimentSpecification",
     "FeatureBuilder",

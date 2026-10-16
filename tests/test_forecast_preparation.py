@@ -11,7 +11,7 @@ from rvol.domain import (
     TargetHorizon,
     WalkForwardSettings,
 )
-from rvol.forecasting.composition import standard_experiment_definition
+from rvol.forecasting.composition import standard_experiment
 from rvol.forecasting.execution import prepare_forecast_data
 from rvol.forecasting.features import HARFeatureBuilder
 from rvol.forecasting.models import HistoricalMeanForecaster
@@ -79,7 +79,7 @@ def test_sparse_reordered_features_keep_targets_on_the_full_session_timeline(kin
     pd.testing.assert_frame_equal(targets, original_targets)
 
 
-def test_definition_can_inject_an_independent_target_builder_and_feature_family():
+def test_experiment_can_inject_an_independent_target_builder_and_feature_family():
     horizon = TargetHorizon(2)
 
     class SparseFeatures:
@@ -107,22 +107,23 @@ def test_definition_can_inject_an_independent_target_builder_and_feature_family(
             targets.attrs["target_horizon"] = {"sessions": 2, "kind": "session"}
             return targets
 
-    definition = replace(
-        standard_experiment_definition(target_horizon=horizon),
+    workflow = replace(
+        standard_experiment(
+            ExperimentConfig(execution=WalkForwardSettings(min_train_size=2)),
+            target_horizon=horizon,
+        ),
         models=(HistoricalMeanForecaster(),), feature_builder=SparseFeatures(),
         target_builder=OtherTargets(), comparison_pairs=(),
         candidate_model="historical_mean", baseline_models=(),
     )
     daily = daily_sample()
     daily["other_outcome"] = np.arange(len(daily)) / 10 - 5
-    prepared = definition.prepare(daily)
-    result = definition.run(daily, ExperimentConfig(
-        execution=WalkForwardSettings(min_train_size=2),
-    ))
+    prepared = workflow.prepare(daily)
+    result = workflow.run(daily)
 
-    assert definition.specification.features.name == "sparse"
-    assert definition.specification.target.name == "other"
-    assert isinstance(definition.target_builder, TargetBuilder)
+    assert workflow.specification.features.name == "sparse"
+    assert workflow.specification.target.name == "other"
+    assert isinstance(workflow.target_builder, TargetBuilder)
     assert result.target_horizon == horizon
     assert result.records
     for record in result.records:

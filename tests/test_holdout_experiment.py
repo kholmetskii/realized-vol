@@ -7,7 +7,7 @@ import pytest
 
 from rvol.domain import ExperimentConfig, HoldoutSettings
 from rvol.domain.contracts import FloatArray
-from rvol.forecasting.composition import standard_experiment_definition
+from rvol.forecasting.composition import standard_experiment
 from rvol.forecasting.execution import HoldoutExperiment
 from rvol.forecasting.models import EWMAForecaster, HistoricalMeanForecaster, NaiveForecaster
 from rvol.forecasting.models.predictors import ConstantPredictor
@@ -194,20 +194,20 @@ def test_holdout_composes_with_the_common_evaluator_and_artifact_writer(tmp_path
     daily = pd.DataFrame({"date": dates, "log_rv": -10 + np.sin(np.arange(60) / 4) / 5})
     source = tmp_path / "daily.parquet"
     daily.to_parquet(source, index=False)
-    definition = standard_experiment_definition(executor_factory=HoldoutExperiment)
     config = ExperimentConfig(execution=HoldoutSettings(dates[40].date(), min_train_size=10))
-    result = definition.run(daily, config)
-    evaluation = definition.evaluator(hac_lags=0).evaluate(result)
+    workflow = standard_experiment(config)
+    result = workflow.run(daily)
+    evaluation = workflow.evaluator(hac_lags=0).evaluate(result)
     snapshot = DatasetSnapshot.from_frame(source, daily)
     writer = ForecastArtifactWriter(tmp_path / "output")
     paths = writer.write(
-        result, evaluation, config=config, dataset=snapshot, specification=definition.specification,
+        result, evaluation, config=config, dataset=snapshot, specification=workflow.specification,
     )
     first = {p.name: p.read_bytes() for p in paths.all()}
-    repeated = definition.run(daily, config)
+    repeated = workflow.run(daily)
     writer.write(
-        repeated, definition.evaluator(hac_lags=0).evaluate(repeated),
-        config=config, dataset=snapshot, specification=definition.specification,
+        repeated, workflow.evaluator(hac_lags=0).evaluate(repeated),
+        config=config, dataset=snapshot, specification=workflow.specification,
     )
 
     assert result.n_forecasts == 95

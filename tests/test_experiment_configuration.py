@@ -7,12 +7,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.cli._arguments import add_forecast_arguments, experiment_run_from_args
+from rvol.cli._arguments import add_forecast_arguments, experiment_from_args
 from rvol.domain import ExperimentConfig, HoldoutSettings, TargetHorizon, WalkForwardSettings
 from rvol.forecasting.composition import (
-    ExperimentRun,
-    experiment_run_from_mapping,
-    standard_experiment_definition,
+    experiment_from_mapping,
+    standard_experiment,
 )
 from rvol.infrastructure.configuration import load_experiment_configuration
 
@@ -27,20 +26,20 @@ def parse(arguments: list[str]):
     add_forecast_arguments(parser)
     parser.add_argument("--compare", action="append", nargs=2)
     parser.add_argument("--metric")
-    return experiment_run_from_args(parser, parser.parse_args(arguments))
+    return experiment_from_args(parser, parser.parse_args(arguments))
 
 
 def test_empty_configuration_preserves_default_components_and_numerical_results():
-    expected = ExperimentRun(standard_experiment_definition(), ExperimentConfig(
+    expected = standard_experiment(ExperimentConfig(
         execution=WalkForwardSettings(min_train_size=20),
     ))
-    actual = experiment_run_from_mapping({"execution": {"min_train_size": 20}})
+    actual = experiment_from_mapping({"execution": {"min_train_size": 20}})
     assert actual.resolved_configuration == expected.resolved_configuration
     assert actual.run(daily_sample()) == expected.run(daily_sample())
 
 
 def test_configuration_constructs_selected_components_with_their_actual_parameters():
-    run = experiment_run_from_mapping({
+    run = experiment_from_mapping({
         "dataset": {"instrument": "GBP/USD"},
         "target": {"sessions": 3, "kind": "cumulative"},
         "features": {"weekly_window": 2, "monthly_window": 4, "check_gaps": False},
@@ -68,7 +67,7 @@ def test_configuration_constructs_selected_components_with_their_actual_paramete
     assert run.plot_metric == "log-RV MSE"
     result = run.run(daily_sample())
     assert result.config is not None and result.config.instrument == "GBP/USD"
-    evaluation = run.definition.evaluator().evaluate(result)
+    evaluation = run.evaluator().evaluate(result)
     assert {summary.metric for summary in evaluation.summaries} == {"log-RV MSE"}
     assert {comparison.candidate_model for comparison in evaluation.comparisons} == {"EWMA"}
     assert evaluation.instrument == "GBP/USD"
@@ -111,7 +110,7 @@ def test_configuration_constructs_selected_components_with_their_actual_paramete
 ])
 def test_invalid_configuration_is_rejected_during_composition(document):
     with pytest.raises(ValueError):
-        experiment_run_from_mapping(document)
+        experiment_from_mapping(document)
 
 
 def test_explicit_flags_override_saved_values_even_when_equal_to_defaults(tmp_path):
@@ -137,7 +136,7 @@ update_observations = true
     assert run.config.instrument == "EUR/USD"
     assert run.config.identity.run_id == "default"
     assert run.config.execution == HoldoutSettings(date(2024, 6, 30), 20, False)
-    parameters = dict(run.definition.target_builder.specification.parameters)
+    parameters = dict(run.target_builder.specification.parameters)
     assert parameters["horizon_sessions"] == 1
     assert parameters["target_kind"] == "session"
 
@@ -145,31 +144,31 @@ update_observations = true
 def test_feature_and_target_source_columns_and_settings_are_independent():
     daily = daily_sample().rename(columns={"date": "session", "log_rv": "input_variance"})
     daily["outcome_variance"] = daily["input_variance"] + 1.5
-    run = experiment_run_from_mapping({
+    run = experiment_from_mapping({
         "features": {"date_col": "session", "rv_col": "input_variance", "weekly_window": 2,
                      "monthly_window": 4},
         "target": {"name": "realized_variance", "date_col": "session",
                    "rv_col": "outcome_variance", "sessions": 3, "kind": "cumulative"},
         "execution": {"min_train_size": 20},
     })
-    prepared = run.definition.prepare(daily)
-    assert run.definition.target_builder.horizon == TargetHorizon(3, "cumulative")
+    prepared = run.prepare(daily)
+    assert run.target_builder.horizon == TargetHorizon(3, "cumulative")
     for index, row in enumerate(prepared.itertuples(), start=3):
         assert row.rv_daily == daily.loc[index, "input_variance"]
         expected = np.exp(daily.loc[index + 1:index + 3, "outcome_variance"]).sum()
         assert row.target == pytest.approx(np.log(expected))
         assert row.target_date == daily.loc[index + 3, "session"]
 
-    changed = experiment_run_from_mapping({
+    changed = experiment_from_mapping({
         "features": {"date_col": "session", "rv_col": "input_variance", "weekly_window": 3,
                      "monthly_window": 10},
         "target": {"name": "realized_variance", "date_col": "session",
                    "rv_col": "outcome_variance", "sessions": 3, "kind": "cumulative"},
         "execution": {"min_train_size": 20},
     })
-    assert changed.definition.specification.target == run.definition.specification.target
+    assert changed.specification.target == run.specification.target
     pd.testing.assert_frame_equal(
-        changed.definition.target_builder(daily), run.definition.target_builder(daily),
+        changed.target_builder(daily), run.target_builder(daily),
     )
 
 
@@ -202,10 +201,10 @@ decay = 0.8
 name = "HAR"
 ''')
     run = parse(["--config", str(source), "--models", "EWMA", "HAR"])
-    assert [model.name for model in run.definition.models] == ["EWMA", "HAR"]
-    assert dict(run.definition.models[0].specification.parameters) == {"decay": 0.8}
-    assert run.definition.baseline_models == ("EWMA",)
-    assert run.definition.comparison_pairs == (("EWMA", "HAR"),)
+    assert [model.name for model in run.models] == ["EWMA", "HAR"]
+    assert dict(run.models[0].specification.parameters) == {"decay": 0.8}
+    assert run.baseline_models == ("EWMA",)
+    assert run.comparison_pairs == (("EWMA", "HAR"),)
 
 
 def test_toml_loader_supports_dates_and_reports_bad_or_missing_files(tmp_path):
@@ -239,10 +238,10 @@ def test_overrides_reconcile_inherited_model_references(
 ):
     unchanged = BASELINE_CONFIG.read_bytes()
     run = parse(["--config", str(BASELINE_CONFIG), *arguments])
-    assert [model.name for model in run.definition.models] == models
-    assert run.definition.candidate_model == candidate
-    assert run.definition.baseline_models == baselines
-    assert run.definition.comparison_pairs == pairs
+    assert [model.name for model in run.models] == models
+    assert run.candidate_model == candidate
+    assert run.baseline_models == baselines
+    assert run.comparison_pairs == pairs
     assert BASELINE_CONFIG.read_bytes() == unchanged
 
 
@@ -253,7 +252,7 @@ def test_model_selection_preserves_surviving_comparisons_and_their_order(tmp_pat
         'comparison_pairs = [["EWMA", "HAR"], ["AR1", "HAR"], ["naive", "HAR"]]',
     ))
     run = parse(["--config", str(path), "--models", "naive", "HAR", "EWMA"])
-    assert run.definition.comparison_pairs == (("EWMA", "HAR"), ("naive", "HAR"))
+    assert run.comparison_pairs == (("EWMA", "HAR"), ("naive", "HAR"))
 
 
 @pytest.mark.parametrize("arguments", [
@@ -275,7 +274,7 @@ def test_an_inherited_empty_comparison_list_remains_disabled(tmp_path):
         'comparison_pairs = [["naive", "HAR"]]', 'comparison_pairs = []',
     ))
     run = parse(["--config", str(path), "--candidate", "naive"])
-    assert run.definition.comparison_pairs == ()
+    assert run.comparison_pairs == ()
 
 
 def test_metric_selection_reconciles_only_the_inherited_plot_metric():
@@ -298,5 +297,5 @@ def test_metric_selection_reconciles_only_the_inherited_plot_metric():
 ])
 def test_configuration_errors_name_fields_instead_of_cli_flags(execution, message):
     with pytest.raises(ValueError, match=message) as error:
-        experiment_run_from_mapping({"execution": execution})
+        experiment_from_mapping({"execution": execution})
     assert "--" not in str(error.value)

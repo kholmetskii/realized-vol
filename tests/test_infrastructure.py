@@ -3,7 +3,6 @@ import pathlib
 import pandas as pd
 import pytest
 
-from rvol.domain import DatasetRepository
 from rvol.infrastructure import ParquetDatasetRepository
 
 
@@ -15,7 +14,6 @@ def test_parquet_repository_round_trip_creates_parent_directory(tmp_path):
     })
     repository = ParquetDatasetRepository(destination)
 
-    assert isinstance(repository, DatasetRepository)
     repository.save(expected)
 
     pd.testing.assert_frame_equal(repository.load(), expected)

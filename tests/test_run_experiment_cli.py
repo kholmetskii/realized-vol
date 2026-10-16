@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import cast
@@ -22,11 +23,9 @@ from rvol.domain import (
     WalkForwardSettings,
 )
 from rvol.forecasting.composition import (
-    ExperimentRun,
     standard_diagnostic_checks,
-    standard_experiment_definition,
+    standard_experiment,
 )
-from rvol.forecasting.execution import HoldoutExperiment
 from rvol.presentation.reporting import (
     DatasetSnapshot,
     ForecastArtifactWriter,
@@ -248,15 +247,15 @@ def test_forecast_cli_strategy_matches_the_python_run(
     )
 
     assert completed.returncode == 0, completed.stderr
-    definition = standard_experiment_definition(target_horizon=TargetHorizon(sessions, kind))
     config = ExperimentConfig(execution=WalkForwardSettings(
             RollingWindow(25) if training_window == "rolling" else ExpandingWindow(),
             EveryNSessions(5), min_train_size=20), forecast_start=start, forecast_end=end)
-    experiment = definition.run(daily, config)
+    definition = standard_experiment(config, target_horizon=TargetHorizon(sessions, kind))
+    experiment = definition.run(daily)
     expected = ForecastArtifactWriter(tmp_path / "expected").write(
         experiment, definition.evaluator().evaluate(experiment), config=config,
         dataset=DatasetSnapshot.from_frame(source, daily), specification=definition.specification,
-        configuration=ExperimentRun(definition, config).resolved_configuration,
+        configuration=definition.resolved_configuration,
     )
     assert {path.name: path.read_bytes() for path in expected.all()} == {
         path.name: (output / path.name).read_bytes() for path in expected.all()
@@ -323,18 +322,18 @@ def test_robustness_option_preserves_overrides_and_matches_the_python_api(
     assert (output / "forecasts.csv").exists()
     assert not (output / "forecasts.png").exists()
     if rolling:
-        definition = standard_experiment_definition()
         config = ExperimentConfig(
             execution=WalkForwardSettings(RollingWindow(25), EveryNSessions(5), min_train_size=20),
             forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
         )
-        experiment = definition.run(daily, config)
+        definition = replace(
+            standard_experiment(config),
+            diagnostic_checks=standard_diagnostic_checks(hac_lags=(0, 1), top_errors=2),
+        )
+        experiment = definition.run(daily)
         expected = RobustnessArtifactWriter(tmp_path / "expected").write(
             definition.robustness_analyzer(hac_lags=(0, 1), top_errors=2).analyze(experiment),
-            configuration=ExperimentRun(
-                definition, config,
-                diagnostic_checks=standard_diagnostic_checks(hac_lags=(0, 1), top_errors=2),
-            ).resolved_configuration,
+            configuration=definition.resolved_configuration,
         )
         assert {p.name: p.read_bytes() for p in expected.all()} == {
             p.name: (diagnostics / p.name).read_bytes() for p in expected.all()
@@ -380,17 +379,18 @@ def test_all_outputs_use_holdout_results_from_the_python_api(
     from rvol.presentation.plotting import forecasting
 
     source, daily = daily_dataset
-    definition = standard_experiment_definition(
-        executor_factory=HoldoutExperiment, target_horizon=TargetHorizon(sessions, target_kind),
-    )
     config = ExperimentConfig(
         execution=HoldoutSettings(date(2022, 3, 4), 20, update),
         identity=RunIdentity("holdout_check", "fold_1"),
         forecast_start=date(2022, 3, 14), forecast_end=date(2022, 3, 21),
     )
-    expected = definition.run(daily, config)
     checks = standard_diagnostic_checks(hac_lags=(0, 1), top_errors=2)
-    configuration = ExperimentRun(definition, config, checks).resolved_configuration
+    definition = replace(
+        standard_experiment(config, target_horizon=TargetHorizon(sessions, target_kind)),
+        diagnostic_checks=checks,
+    )
+    expected = definition.run(daily)
+    configuration = definition.resolved_configuration
     output = tmp_path / "holdout"
     captured: list[ExperimentResult] = []
     plot = forecasting.plot_forecast_evaluation

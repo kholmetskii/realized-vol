@@ -29,17 +29,18 @@ class HoldoutExperiment:
     """
 
     def __init__(
-        self, models: Sequence[Forecaster], config: ExperimentConfig[HoldoutSettings],
+        self, models: Sequence[Forecaster], config: ExperimentConfig,
     ) -> None:
         if not isinstance(config.execution, HoldoutSettings):
             raise TypeError("holdout execution requires HoldoutSettings")
         self.models = validated_models(models)
         self.config = config
+        self.settings = config.execution
 
     def run(self, features: pd.DataFrame) -> ExperimentResult:
         frame = validated_features(features, self.models)
         horizon = target_horizon(frame)
-        settings = self.config.execution
+        settings = self.settings
         execution = ExecutionMetadata(
             executor=f"{type(self).__module__}.{type(self).__qualname__}",
             settings=settings.specification,

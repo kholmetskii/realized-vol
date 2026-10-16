@@ -13,7 +13,6 @@ import pandas as pd
 
 from rvol.domain import (
     ComponentSpecification,
-    DescribedExecutionSettings,
     ExperimentConfig,
     ExperimentResult,
 )
@@ -91,7 +90,7 @@ class ForecastArtifactWriter:
         experiment: ExperimentResult,
         evaluation: EvaluationResult,
         *,
-        config: ExperimentConfig[DescribedExecutionSettings],
+        config: ExperimentConfig,
         dataset: DatasetSnapshot,
         specification: ExperimentSpecification,
         configuration: Mapping[str, object] | None = None,

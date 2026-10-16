@@ -34,15 +34,16 @@ class WalkForwardExperiment:
     def __init__(
         self,
         models: Sequence[Forecaster],
-        config: ExperimentConfig[WalkForwardSettings],
+        config: ExperimentConfig,
     ) -> None:
         if not isinstance(config.execution, WalkForwardSettings):
             raise TypeError("walk-forward execution requires WalkForwardSettings")
         self.models = validated_models(models)
         self.config = config
+        self.settings = config.execution
 
     def _training_slice(self, n_available: int) -> slice:
-        selected = self.config.execution.training_window.select(n_available)
+        selected = self.settings.training_window.select(n_available)
         if not isinstance(selected, slice):
             raise ValueError("training window must select a contiguous slice")
         start = 0 if selected.start is None else selected.start
@@ -68,9 +69,9 @@ class WalkForwardExperiment:
                 break
             n_available = int(targets.searchsorted(origin, side="right"))
             training_slice = self._training_slice(n_available)
-            if training_slice.stop - training_slice.start < self.config.execution.min_train_size:
+            if training_slice.stop - training_slice.start < self.settings.min_train_size:
                 continue
-            due = self.config.execution.retrain.should_refit(len(steps))
+            due = self.settings.retrain.should_refit(len(steps))
             steps.append(_ExecutionStep(
                 position=position,
                 origin_date=origin.date(),
@@ -85,7 +86,7 @@ class WalkForwardExperiment:
         """Fit or update at each origin and report forecasts within date bounds."""
         frame = validated_features(features, self.models)
         horizon = target_horizon(frame)
-        settings = self.config.execution.specification
+        settings = self.settings.specification
         plan = self._execution_plan(frame)
         anchor = plan[0].origin_date if plan else None
         execution = ExecutionMetadata(

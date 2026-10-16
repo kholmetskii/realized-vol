@@ -96,7 +96,7 @@ class ExperimentResult:
     """Forecast records from one experiment run."""
 
     records: tuple[ForecastRecord, ...] = ()
-    config: ExperimentConfig[object] | None = None
+    config: ExperimentConfig | None = None
     execution: ExecutionMetadata | None = None
     identity: RunIdentity = field(default_factory=RunIdentity)
     target_horizon: TargetHorizon = field(default_factory=TargetHorizon)

@@ -8,7 +8,7 @@ import pytest
 
 from rvol.cli import run_experiment
 from rvol.domain import ExperimentResult
-from rvol.forecasting.composition import ExperimentRun, experiment_run_from_mapping
+from rvol.forecasting.composition import Experiment, experiment_from_mapping
 from rvol.forecasting.evaluation import (
     EvaluationResult,
     ForecastEvaluator,
@@ -87,19 +87,19 @@ def test_command_runs_and_evaluates_once_and_all_outputs_match_the_python_api(
     config_path.write_text(
         CONFIGURATION + f'\n[execution]\nname="{executor}"\nmin_train_size=20\n' + execution,
     )
-    expected_run = experiment_run_from_mapping(load_experiment_configuration(config_path))
+    expected_run = experiment_from_mapping(load_experiment_configuration(config_path))
     expected = expected_run.run(daily)
-    expected_evaluation = expected_run.definition.evaluator().evaluate(expected)
+    expected_evaluation = expected_run.evaluator().evaluate(expected)
     expected_configuration = json.loads(json.dumps(expected_run.resolved_configuration))
     snapshot = DatasetSnapshot.from_frame(source, daily, date_column="session")
     expected_paths = ForecastArtifactWriter(tmp_path / "expected").write(
         expected, expected_evaluation, config=expected_run.config,
-        specification=expected_run.definition.specification, dataset=snapshot,
+        specification=expected_run.specification, dataset=snapshot,
         configuration=expected_run.resolved_configuration,
     ).all()
     if "--robustness" in reports:
         expected_paths += RobustnessArtifactWriter(tmp_path / "expected" / "robustness").write(
-            expected_run.definition.robustness_analyzer(
+            expected_run.robustness_analyzer(
                 checks=expected_run.diagnostic_checks,
             ).analyze(expected, evaluation=expected_evaluation),
             configuration=expected_run.resolved_configuration,
@@ -109,7 +109,7 @@ def test_command_runs_and_evaluates_once_and_all_outputs_match_the_python_api(
     evaluations: list[EvaluationResult] = []
     plot_records: list[ExperimentResult] = []
     diagnostic_records: list[ExperimentResult] = []
-    original_run = ExperimentRun.run
+    original_run = Experiment.run
     original_evaluate = ForecastEvaluator.evaluate
     original_analyze = ForecastRobustnessAnalyzer.analyze
     original_plot = forecasting.plot_forecast_evaluation
@@ -143,7 +143,7 @@ def test_command_runs_and_evaluates_once_and_all_outputs_match_the_python_api(
         assert labels == ["Naïve − EWMA"]
         return figure
 
-    monkeypatch.setattr(ExperimentRun, "run", capture_run)
+    monkeypatch.setattr(Experiment, "run", capture_run)
     monkeypatch.setattr(ForecastEvaluator, "evaluate", capture_evaluate)
     monkeypatch.setattr(ForecastRobustnessAnalyzer, "analyze", capture_analyze)
     monkeypatch.setattr(forecasting, "plot_forecast_evaluation", capture_plot)

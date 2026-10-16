@@ -2,7 +2,6 @@ import json
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, timedelta
-from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -20,7 +19,7 @@ from rvol.domain import (
     WalkForwardSettings,
 )
 from rvol.domain.contracts import FloatArray
-from rvol.forecasting.composition import standard_experiment_definition
+from rvol.forecasting.composition import standard_experiment
 from rvol.forecasting.evaluation import ForecastEvaluator
 from rvol.forecasting.execution import (
     HoldoutExperiment,
@@ -157,20 +156,16 @@ def test_future_values_cannot_change_any_models_current_forecast(kind, strategy)
     origin = daily["date"].iloc[origin_position].date()
     run_daily: Callable[[pd.DataFrame], ExperimentResult]
     if strategy.startswith("holdout"):
-        holdout = standard_experiment_definition(
-            executor_factory=HoldoutExperiment, target_horizon=horizon,
-        )
         holdout_config = ExperimentConfig(execution=HoldoutSettings(
             daily["date"].iloc[45].date(), 20, strategy == "holdout_updated",
         ))
-        run_daily = partial(holdout.run, config=holdout_config)
+        run_daily = standard_experiment(holdout_config, target_horizon=horizon).run
     else:
-        walk_forward = standard_experiment_definition(target_horizon=horizon)
         settings = WalkForwardSettings(retrain=EveryNSessions(4), min_train_size=20)
         if strategy == "rolling":
             settings = replace(settings, training_window=RollingWindow(25))
         walk_forward_config = ExperimentConfig(execution=settings)
-        run_daily = partial(walk_forward.run, config=walk_forward_config)
+        run_daily = standard_experiment(walk_forward_config, target_horizon=horizon).run
     before = run_daily(daily)
     after = run_daily(changed)
     assert [(r.model, r.origin_date, r.predicted_log_rv) for r in before.records
@@ -192,22 +187,25 @@ def test_future_values_cannot_change_any_models_current_forecast(kind, strategy)
 
 def test_multisession_walk_forward_reporting_bounds_preserve_fit_schedule_and_updates():
     daily = daily_sample()
-    definition = standard_experiment_definition(target_horizon=TargetHorizon(5, "cumulative"))
     config = ExperimentConfig(execution=WalkForwardSettings(
         RollingWindow(25), EveryNSessions(4), min_train_size=20,
     ))
-    full = definition.run(daily, config)
+    workflow = standard_experiment(config, target_horizon=TargetHorizon(5, "cumulative"))
+    full = workflow.run(daily)
     start, end = daily["date"].iloc[61].date(), daily["date"].iloc[72].date()
-    bounded = definition.run(daily, replace(config, forecast_start=start, forecast_end=end))
+    bounded = replace(workflow, config=replace(
+        config, forecast_start=start, forecast_end=end,
+    )).run(daily)
     assert bounded.records == tuple(r for r in full.records if start <= r.target_date <= end)
     assert bounded.execution == full.execution
 
 
 def test_empty_walk_forward_result_preserves_its_target_definition():
     horizon = TargetHorizon(100, "cumulative")
-    result = standard_experiment_definition(target_horizon=horizon).run(
-        daily_sample(30), ExperimentConfig(execution=WalkForwardSettings(min_train_size=5)),
-    )
+    result = standard_experiment(
+        ExperimentConfig(execution=WalkForwardSettings(min_train_size=5)),
+        target_horizon=horizon,
+    ).run(daily_sample(30))
     assert result.records == ()
     assert result.target_horizon == horizon
 
@@ -224,7 +222,7 @@ def test_target_definitions_reject_invalid_options(sessions, kind):
     "corruption", ["partial", "mixed", "missing_start", "reversed", "same_end"],
 )
 def test_executors_reject_ambiguous_or_invalid_prepared_targets(corruption):
-    features = standard_experiment_definition(
+    features = standard_experiment(
         target_horizon=TargetHorizon(3, "cumulative"),
     ).prepare(daily_sample(40))
     if corruption == "partial":
@@ -259,28 +257,29 @@ def test_records_require_a_consistent_target_interval_and_experiment_horizon():
 
 
 def test_default_comparison_accounts_for_horizon_and_explicit_lags_remain_configurable():
-    definition = standard_experiment_definition(target_horizon=TargetHorizon(5, "cumulative"))
     daily = daily_sample()
     config = ExperimentConfig(
         execution=WalkForwardSettings(min_train_size=20),
         forecast_start=daily["date"].iloc[70].date(),
         forecast_end=daily["date"].iloc[79].date(),
     )
-    experiment = definition.run(daily, config)
-    evaluation = definition.evaluator().evaluate(experiment)
-    direct = ForecastEvaluator(comparison_pairs=definition.comparison_pairs).evaluate(experiment)
+    workflow = standard_experiment(config, target_horizon=TargetHorizon(5, "cumulative"))
+    experiment = workflow.run(daily)
+    evaluation = workflow.evaluator().evaluate(experiment)
+    direct = ForecastEvaluator(comparison_pairs=workflow.comparison_pairs).evaluate(experiment)
     assert direct == evaluation
     assert {dict(item.test_parameters)["hac_lags"] for item in evaluation.comparisons} == {4}
-    overridden = definition.evaluator(hac_lags=0).evaluate(experiment)
+    overridden = workflow.evaluator(hac_lags=0).evaluate(experiment)
     assert {dict(item.test_parameters)["hac_lags"] for item in overridden.comparisons} == {0}
 
 
 @pytest.mark.parametrize("column", ["origin_date", "target_start_date"])
 def test_evaluation_rejects_models_predicting_different_intervals(column):
-    definition = standard_experiment_definition(target_horizon=TargetHorizon(5, "cumulative"))
-    result = definition.run(daily_sample(), ExperimentConfig(
-        execution=WalkForwardSettings(min_train_size=20),
-    ))
+    workflow = standard_experiment(
+        ExperimentConfig(execution=WalkForwardSettings(min_train_size=20)),
+        target_horizon=TargetHorizon(5, "cumulative"),
+    )
+    result = workflow.run(daily_sample())
     first = result.records[0]
     if column == "origin_date":
         altered = replace(
@@ -295,19 +294,19 @@ def test_evaluation_rejects_models_predicting_different_intervals(column):
 
 def test_horizon_is_exported_and_mismatched_evaluations_and_validation_are_rejected(tmp_path):
     horizon = TargetHorizon(3, "cumulative")
-    definition = standard_experiment_definition(target_horizon=horizon)
     daily = daily_sample()
     source = tmp_path / "daily.parquet"
     daily.to_parquet(source, index=False)
     config = ExperimentConfig(execution=WalkForwardSettings(min_train_size=20))
-    experiment = definition.run(daily, config)
-    evaluation = definition.evaluator().evaluate(experiment)
+    workflow = standard_experiment(config, target_horizon=horizon)
+    experiment = workflow.run(daily)
+    evaluation = workflow.evaluator().evaluate(experiment)
     snapshot = DatasetSnapshot.from_frame(source, daily)
     writer = ForecastArtifactWriter(tmp_path / "forecast")
     with pytest.raises(ValueError, match="evaluation target must match"):
         writer.write(
             experiment, replace(evaluation, target_horizon=TargetHorizon()),
-            config=config, dataset=snapshot, specification=definition.specification,
+            config=config, dataset=snapshot, specification=workflow.specification,
         )
     assert not writer.output_dir.exists()
     with pytest.raises(ValueError, match="evaluation target must match"):
@@ -316,7 +315,7 @@ def test_horizon_is_exported_and_mismatched_evaluations_and_validation_are_rejec
         )
     paths = writer.write(
         experiment, evaluation, config=config, dataset=snapshot,
-        specification=definition.specification,
+        specification=workflow.specification,
     )
     metadata = json.loads(paths.experiment.read_text())
     assert metadata["target"]["parameters"] == {"sessions": 3, "kind": "cumulative"}
@@ -324,13 +323,13 @@ def test_horizon_is_exported_and_mismatched_evaluations_and_validation_are_rejec
     assert list(forecasts.target_start_date) == [str(r.target_start) for r in sorted(
         experiment.records, key=lambda r: (r.target_date, r.model),
     )]
-    robust = definition.robustness_analyzer().analyze(experiment)
+    robust = workflow.robustness_analyzer().analyze(experiment)
     robust_paths = RobustnessArtifactWriter(tmp_path / "robust").write(robust)
     assert json.loads(robust_paths.metadata.read_text())["target"] == {
         "sessions": 3, "kind": "cumulative",
     }
     other = replace(experiment, identity=RunIdentity("other"), config=None)
-    validation = definition.evaluator().evaluate_runs((experiment, other))
+    validation = workflow.evaluator().evaluate_runs((experiment, other))
     validation_paths = ValidationArtifactWriter(tmp_path / "validation").write(validation)
     assert json.loads(validation_paths.metadata.read_text())["target"]["sessions"] == 3
     for path in (paths.forecasts, paths.loss_summary, paths.comparisons,
@@ -345,4 +344,4 @@ def test_horizon_is_exported_and_mismatched_evaluations_and_validation_are_rejec
         ),
     )
     with pytest.raises(ValueError, match="identical target horizons"):
-        definition.evaluator().evaluate_runs((experiment, incompatible))
+        workflow.evaluator().evaluate_runs((experiment, incompatible))

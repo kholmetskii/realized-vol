@@ -8,9 +8,8 @@ from typing import Any
 
 import pandas as pd
 
-from rvol.domain import HoldoutSettings, WalkForwardSettings
-from rvol.forecasting.composition import ExperimentRun
-from rvol.forecasting.composition.configuration import experiment_run_from_mapping
+from rvol.forecasting.composition import Experiment
+from rvol.forecasting.composition.configuration import experiment_from_mapping
 from rvol.infrastructure.configuration import load_experiment_configuration
 from rvol.presentation.reporting import DatasetSnapshot
 
@@ -96,9 +95,9 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def experiment_run_from_args(
+def experiment_from_args(
     parser: argparse.ArgumentParser, args: argparse.Namespace,
-) -> ExperimentRun[WalkForwardSettings] | ExperimentRun[HoldoutSettings]:
+) -> Experiment:
     """Resolve defaults < TOML < explicit flags, validating everything before data I/O."""
     try:
         document = {} if args.config is None else load_experiment_configuration(args.config)
@@ -160,7 +159,7 @@ def experiment_run_from_args(
             plot = table("plot")
             if plot.get("metric") not in args.metrics:
                 plot.pop("metric", None)
-        return experiment_run_from_mapping(document)
+        return experiment_from_mapping(document)
     except ValueError as error:
         parser.error(str(error))
 
@@ -194,8 +193,8 @@ def _reconcile_comparisons(evaluation: dict[str, Any], args: argparse.Namespace)
 
 def forecast_dataset_snapshot(
     source: str, daily: pd.DataFrame,
-    run: ExperimentRun[WalkForwardSettings] | ExperimentRun[HoldoutSettings],
+    run: Experiment,
 ) -> DatasetSnapshot:
-    date_column = dict(run.definition.target_builder.specification.parameters)["date_col"]
+    date_column = dict(run.target_builder.specification.parameters)["date_col"]
     assert isinstance(date_column, str)
     return DatasetSnapshot.from_frame(source, daily, date_column=date_column)

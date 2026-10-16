@@ -7,13 +7,13 @@ import pytest
 
 from rvol.domain import (
     ComponentSpecification,
-    DatasetRepository,
     ExperimentConfig,
     ExperimentResult,
     FittedForecaster,
     Forecaster,
     ForecastMetric,
     ForecastRecord,
+    HoldoutSettings,
     RollingWindow,
     WalkForwardSettings,
 )
@@ -51,17 +51,6 @@ class SquaredError:
         return np.square(actual - predicted)
 
 
-class MemoryRepository:
-    def __init__(self):
-        self.dataset: list[float] = []
-
-    def load(self) -> list[float]:
-        return self.dataset.copy()
-
-    def save(self, dataset: list[float]) -> None:
-        self.dataset = dataset.copy()
-
-
 def sample_record(model: str = "HAR") -> ForecastRecord:
     return ForecastRecord(
         model=model,
@@ -77,12 +66,10 @@ def test_structural_contracts_accept_independent_implementations():
     forecaster = MeanForecaster()
     fitted = forecaster.fit(np.empty((3, 0)), np.array([-10.0, -9.0, -8.0]))
     metric = SquaredError()
-    repository = MemoryRepository()
 
     assert isinstance(forecaster, Forecaster)
     assert isinstance(fitted, FittedForecaster)
     assert isinstance(metric, ForecastMetric)
-    assert isinstance(repository, DatasetRepository)
     assert np.allclose(fitted.predict(np.empty((2, 0))), -9.0)
     assert np.allclose(metric.losses(np.array([1.0]), np.array([0.5])), 0.25)
 
@@ -160,11 +147,20 @@ def test_walk_forward_settings_validate_their_own_training_requirement(minimum):
         WalkForwardSettings(min_train_size=minimum)
 
 
-def test_shared_configuration_accepts_independent_settings():
-    config = ExperimentConfig(execution=("custom", 3), forecast_start=date(2024, 1, 1))
+@pytest.mark.parametrize("settings", [
+    WalkForwardSettings(min_train_size=10),
+    HoldoutSettings(train_end=date(2024, 1, 1), min_train_size=10),
+])
+def test_shared_configuration_accepts_supported_execution_settings(settings):
+    config = ExperimentConfig(execution=settings, forecast_start=date(2024, 1, 1))
 
-    assert config.execution == ("custom", 3)
-    assert not hasattr(config, "min_train_size")
+    assert config.execution is settings
+
+
+@pytest.mark.parametrize("settings", [("custom", 3), None, "walk_forward"])
+def test_shared_configuration_rejects_unsupported_execution_settings(settings):
+    with pytest.raises(TypeError, match="WalkForwardSettings or HoldoutSettings"):
+        ExperimentConfig(execution=settings)
 
 
 def test_forecast_fit_dates_must_be_complete_and_precede_the_origin():

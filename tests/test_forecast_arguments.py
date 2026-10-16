@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from rvol.cli._arguments import add_forecast_arguments, experiment_run_from_args
+from rvol.cli._arguments import add_forecast_arguments, experiment_from_args
 from rvol.domain import (
     EveryNSessions,
     ExperimentConfig,
@@ -12,13 +12,12 @@ from rvol.domain import (
     RunIdentity,
     WalkForwardSettings,
 )
-from rvol.forecasting.execution import HoldoutExperiment, WalkForwardExperiment
 
 
-def parse_config(arguments: list[str]) -> ExperimentConfig[WalkForwardSettings | HoldoutSettings]:
+def parse_config(arguments: list[str]) -> ExperimentConfig:
     parser = argparse.ArgumentParser()
     add_forecast_arguments(parser)
-    return experiment_run_from_args(parser, parser.parse_args(arguments)).config
+    return experiment_from_args(parser, parser.parse_args(arguments)).config
 
 
 def test_default_forecast_arguments_preserve_the_domain_defaults():
@@ -36,9 +35,9 @@ def test_holdout_arguments_select_compatible_executor_and_settings(update):
         "--executor", "holdout", "--train-end", "2024-12-31", "--min-train-size", "20",
         *(["--update-observations"] if update else []),
     ])
-    run = experiment_run_from_args(parser, args)
+    run = experiment_from_args(parser, args)
 
-    assert run.definition.executor_factory is HoldoutExperiment
+    assert isinstance(run.config.execution, HoldoutSettings)
     assert run.config == ExperimentConfig(execution=HoldoutSettings(date(2024, 12, 31), 20, update))
 
 
@@ -48,8 +47,8 @@ def test_each_executor_uses_its_own_default_settings():
     )
     parser = argparse.ArgumentParser()
     add_forecast_arguments(parser)
-    run = experiment_run_from_args(parser, parser.parse_args(["--executor", "walk-forward"]))
-    assert run.definition.executor_factory is WalkForwardExperiment
+    run = experiment_from_args(parser, parser.parse_args(["--executor", "walk-forward"]))
+    assert isinstance(run.config.execution, WalkForwardSettings)
     assert run.config == ExperimentConfig(execution=WalkForwardSettings())
 
 
@@ -63,13 +62,13 @@ def test_run_and_fold_identities_are_configurable_in_shared_arguments():
 def test_target_arguments_configure_targets_and_persistence_benchmark(kind, multiplier):
     parser = argparse.ArgumentParser()
     add_forecast_arguments(parser)
-    run = experiment_run_from_args(parser, parser.parse_args([
+    run = experiment_from_args(parser, parser.parse_args([
         "--horizon", "5", "--target-kind", kind,
     ]))
-    parameters = dict(run.definition.target_builder.specification.parameters)
+    parameters = dict(run.target_builder.specification.parameters)
     assert parameters["horizon_sessions"] == 5
     assert parameters["target_kind"] == kind
-    naive = next(model for model in run.definition.models if model.name == "naive")
+    naive = next(model for model in run.models if model.name == "naive")
     assert dict(naive.specification.parameters)["variance_multiplier"] == multiplier
 
 

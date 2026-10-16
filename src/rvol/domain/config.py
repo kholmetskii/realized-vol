@@ -4,24 +4,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Generic, TypeVar
 
 from rvol.domain.identity import RunIdentity
-
-Settings = TypeVar("Settings", covariant=True)
+from rvol.domain.settings import HoldoutSettings, WalkForwardSettings
 
 
 @dataclass(frozen=True)
-class ExperimentConfig(Generic[Settings]):
-    """Shared reporting bounds, instrument label and typed executor settings."""
+class ExperimentConfig:
+    """Reporting bounds, instrument label and execution settings for a run."""
 
-    execution: Settings
+    execution: WalkForwardSettings | HoldoutSettings
     forecast_start: date | None = None
     forecast_end: date | None = None
     identity: RunIdentity = field(default_factory=RunIdentity)
     instrument: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.execution, (WalkForwardSettings, HoldoutSettings)):
+            raise TypeError("execution must be WalkForwardSettings or HoldoutSettings")
         if self.instrument is not None and (
             not isinstance(self.instrument, str) or not self.instrument.strip()
         ):

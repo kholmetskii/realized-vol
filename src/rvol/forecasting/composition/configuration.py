@@ -7,13 +7,10 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from typing import Any, TypeVar
 
-import pandas as pd
-
 from rvol.domain import (
     EveryNSessions,
     ExpandingWindow,
     ExperimentConfig,
-    ExperimentExecutorFactory,
     HoldoutSettings,
     RollingWindow,
     RunIdentity,
@@ -22,10 +19,9 @@ from rvol.domain import (
 )
 from rvol.domain.contracts import ForecastComparisonTest, Forecaster, ForecastMetric
 from rvol.forecasting.composition.forecasting import (
-    ExperimentDefinition,
-    ExperimentRun,
+    Experiment,
     standard_diagnostic_checks,
-    standard_experiment_definition,
+    standard_experiment,
 )
 from rvol.forecasting.evaluation import (
     DieboldMarianoTest,
@@ -34,7 +30,6 @@ from rvol.forecasting.evaluation import (
     LogMSEMetric,
     QLikeMetric,
 )
-from rvol.forecasting.execution import HoldoutExperiment, WalkForwardExperiment
 from rvol.forecasting.features import HARFeatureBuilder
 from rvol.forecasting.models import (
     AR1Forecaster,
@@ -46,7 +41,6 @@ from rvol.forecasting.models import (
 from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 
 T = TypeVar("T")
-Settings = TypeVar("Settings")
 MODEL_FACTORIES: Mapping[str, Callable[..., Forecaster]] = {
     "historical_mean": HistoricalMeanForecaster, "naive": NaiveForecaster,
     "EWMA": EWMAForecaster, "AR1": AR1Forecaster, "HAR": HARForecaster,
@@ -122,13 +116,13 @@ def _component(
         raise ValueError(f"invalid {location} settings: {error}") from error
 
 
-def experiment_run_from_mapping(
+def experiment_from_mapping(
     document: Mapping[str, Any],
-) -> ExperimentRun[WalkForwardSettings] | ExperimentRun[HoldoutSettings]:
+) -> Experiment:
     """Resolve defaults and a validated document without reading a dataset.
 
     Names select registered built-in components; Python callers can continue
-    constructing ExperimentDefinition directly with independent implementations.
+    constructing Experiment directly with independent models and builders.
     """
     _keys(document, {
         "version", "dataset", "run", "target", "execution", "features", "models",
@@ -146,7 +140,7 @@ def experiment_run_from_mapping(
     target = _component(
         target_values, TARGET_FACTORIES, "target", "realized_variance", {"horizon": horizon},
     )
-    defaults = standard_experiment_definition(target_horizon=horizon)
+    defaults = standard_experiment(target_horizon=horizon)
     feature_values = _table(document, "features")
     check_gaps = feature_values.pop("check_gaps", True)
     if not isinstance(check_gaps, bool):
@@ -224,24 +218,23 @@ def experiment_run_from_mapping(
         "train_end", "update_observations",
     })
 
-    def assemble(
-        factory: ExperimentExecutorFactory[Settings, pd.DataFrame], settings: Settings,
-    ) -> ExperimentRun[Settings]:
-        definition = ExperimentDefinition(
-            models=models, feature_builder=features, target_builder=target,
-            executor_factory=factory, metrics=metrics,
-            comparison_pairs=tuple((pair[0], pair[1]) for pair in pairs),
-            candidate_model=candidate, baseline_models=baselines, comparison_test=test,
-        )
-        config = ExperimentConfig(
-            execution=settings,
+    return Experiment(
+        config=ExperimentConfig(
+            execution=_execution_settings(execution),
             forecast_start=_date(run.get("forecast_start"), "run.forecast_start"),
             forecast_end=_date(run.get("forecast_end"), "run.forecast_end"),
             identity=RunIdentity(run.get("run_id", "default"), run.get("fold_id")),
             instrument=dataset.get("instrument"),
-        )
-        return ExperimentRun(definition, config, checks, plot.get("metric"))
+        ),
+        models=models, feature_builder=features, target_builder=target, metrics=metrics,
+        comparison_pairs=tuple((pair[0], pair[1]) for pair in pairs),
+        candidate_model=candidate, baseline_models=baselines, comparison_test=test,
+        diagnostic_checks=checks, plot_metric=plot.get("metric"),
+    )
 
+
+def _execution_settings(execution: Mapping[str, Any]) -> WalkForwardSettings | HoldoutSettings:
+    """Parse the two supported chronological execution strategies."""
     name = execution.get("name", "walk-forward")
     if name == "holdout":
         for key in ("training_window", "window_size", "retrain_every"):
@@ -250,10 +243,10 @@ def experiment_run_from_mapping(
         train_end = _date(execution.get("train_end"), "execution.train_end")
         if train_end is None:
             raise ValueError("execution.train_end is required when execution.name = 'holdout'")
-        return assemble(HoldoutExperiment, HoldoutSettings(
+        return HoldoutSettings(
             train_end, execution.get("min_train_size", HoldoutSettings(train_end).min_train_size),
             execution.get("update_observations", False),
-        ))
+        )
     if name != "walk-forward":
         raise ValueError("execution.name must be walk-forward or holdout")
     if "train_end" in execution:
@@ -272,7 +265,7 @@ def experiment_run_from_mapping(
     window = (
         RollingWindow(execution["window_size"]) if window_name == "rolling" else ExpandingWindow()
     )
-    return assemble(WalkForwardExperiment, WalkForwardSettings(
+    return WalkForwardSettings(
         window, EveryNSessions(execution.get("retrain_every", 1)),
         execution.get("min_train_size", WalkForwardSettings().min_train_size),
-    ))
+    )

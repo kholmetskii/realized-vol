@@ -1,17 +1,14 @@
-"""Compose the standard realized-volatility forecast experiment."""
+"""Configure and run realized-volatility experiments with explicit workflow steps."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field, replace
-from typing import Generic, TypeVar, overload
 
 import pandas as pd
 
 from rvol.domain import (
-    DescribedExecutionSettings,
     ExperimentConfig,
-    ExperimentExecutorFactory,
     ExperimentResult,
     ExperimentSpecification,
     FeatureBuilder,
@@ -50,7 +47,6 @@ from rvol.forecasting.models import (
 )
 from rvol.forecasting.targets import RealizedVarianceTargetBuilder
 
-Settings = TypeVar("Settings")
 ROBUSTNESS_CHECK_NAMES = ("hac_sensitivity", "win_rates", "monthly_losses", "largest_errors")
 
 
@@ -73,18 +69,26 @@ def standard_diagnostic_checks(
 
 
 @dataclass(frozen=True)
-class ExperimentDefinition(Generic[Settings]):
-    """Select the components and comparison defaults for a forecast workflow."""
+class Experiment:
+    """The settings and components for one repeatable forecast experiment.
 
+    Preparation, execution, evaluation and export remain separate steps. The
+    execution settings select either the walk-forward or fixed-cutoff workflow.
+    """
+
+    config: ExperimentConfig
     models: tuple[Forecaster, ...]
     feature_builder: FeatureBuilder[pd.DataFrame]
     target_builder: TargetBuilder[pd.DataFrame]
-    executor_factory: ExperimentExecutorFactory[Settings, pd.DataFrame]
     metrics: tuple[ForecastMetric, ...]
     comparison_pairs: tuple[tuple[str, str], ...]
     candidate_model: str
     baseline_models: tuple[str, ...]
     comparison_test: ForecastComparisonTest = field(default_factory=DieboldMarianoTest)
+    diagnostic_checks: tuple[DiagnosticCheck, ...] = field(
+        default_factory=standard_diagnostic_checks,
+    )
+    plot_metric: str | None = None
 
     def __post_init__(self) -> None:
         names = [model.name for model in self.models]
@@ -98,7 +102,16 @@ class ExperimentDefinition(Generic[Settings]):
         references.update(name for pair in self.comparison_pairs for name in pair)
         missing = references.difference(names)
         if missing:
-            raise ValueError(f"definition references unknown models: {', '.join(sorted(missing))}")
+            raise ValueError(f"experiment references unknown models: {', '.join(sorted(missing))}")
+        metric_names = [metric.name for metric in self.metrics]
+        if self.plot_metric is None:
+            object.__setattr__(self, "plot_metric", metric_names[0])
+        if self.plot_metric not in metric_names:
+            raise ValueError("plot metric must be one of the selected evaluation metrics")
+        # Reject invalid selections before loading data or fitting models.
+        self.evaluator()
+        _ = self.specification
+        self.robustness_analyzer()
 
     @property
     def specification(self) -> ExperimentSpecification:
@@ -129,9 +142,13 @@ class ExperimentDefinition(Generic[Settings]):
             self.feature_builder(daily), targets, expected_horizon=self.target_builder.horizon,
         )
 
-    def run(self, daily: pd.DataFrame, config: ExperimentConfig[Settings]) -> ExperimentResult:
-        """Create an independent executor and delegate the aligned forecast data."""
-        executor = self.executor_factory(self.models, config)
+    def run(self, daily: pd.DataFrame) -> ExperimentResult:
+        """Prepare inputs and run the configured chronological execution method."""
+        executor: HoldoutExperiment | WalkForwardExperiment
+        if isinstance(self.config.execution, HoldoutSettings):
+            executor = HoldoutExperiment(self.models, self.config)
+        else:
+            executor = WalkForwardExperiment(self.models, self.config)
         return executor.run(self.prepare(daily))
 
     def evaluator(
@@ -166,54 +183,29 @@ class ExperimentDefinition(Generic[Settings]):
         """Build robustness checks for the configured candidate and baselines."""
         if checks is not None and (hac_lags is not None or top_errors is not None):
             raise ValueError("configure settings on the injected diagnostic checks")
-        return ForecastRobustnessAnalyzer(
-            checks=(
-                standard_diagnostic_checks(
+        if checks is None:
+            checks = self.diagnostic_checks
+            if hac_lags is not None or top_errors is not None:
+                checks = standard_diagnostic_checks(
                     hac_lags=tuple(range(6)) if hac_lags is None else hac_lags,
                     top_errors=5 if top_errors is None else top_errors,
                 )
-                if checks is None else checks
-            ),
+        return ForecastRobustnessAnalyzer(
+            checks=checks,
             candidate_model=self.candidate_model,
             baseline_models=self.baseline_models,
             metrics=self.metrics,
         )
 
-
-@dataclass(frozen=True)
-class ExperimentRun(Generic[Settings]):
-    """Bind an experiment definition to compatible settings for repeated execution."""
-
-    definition: ExperimentDefinition[Settings]
-    config: ExperimentConfig[Settings]
-    diagnostic_checks: tuple[DiagnosticCheck, ...] = field(
-        default_factory=standard_diagnostic_checks,
-    )
-    plot_metric: str | None = None
-
-    def __post_init__(self) -> None:
-        metric_names = [metric.name for metric in self.definition.metrics]
-        if self.plot_metric is None:
-            object.__setattr__(self, "plot_metric", metric_names[0])
-        if self.plot_metric not in metric_names:
-            raise ValueError("plot metric must be one of the selected evaluation metrics")
-        self.definition.evaluator()
-        # Validate model inputs and diagnostic selection before loading a dataset.
-        _ = self.definition.specification
-        self.definition.robustness_analyzer(checks=self.diagnostic_checks)
-
     @property
     def resolved_configuration(self) -> dict[str, object]:
         """Describe the actual components and settings, independent of their input source."""
         settings = self.config.execution
-        if not isinstance(settings, DescribedExecutionSettings):
-            raise ValueError("resolved configuration requires described execution settings")
 
         def component(value: ComponentSpecification) -> dict[str, object]:
             return asdict(value) | {"parameters": dict(value.parameters)}
 
-        definition = self.definition
-        specification = definition.specification
+        specification = self.specification
         return {
             "dataset": {"instrument": self.config.instrument},
             "run": {
@@ -237,18 +229,15 @@ class ExperimentRun(Generic[Settings]):
             "models": [component(model) for model in specification.models],
             "evaluation": {
                 "metrics": [{"name": metric.name, "scale": metric.scale}
-                            for metric in definition.metrics],
-                "comparison_test": component(definition.comparison_test.specification),
-                "comparison_pairs": [list(pair) for pair in definition.comparison_pairs],
-                "candidate_model": definition.candidate_model,
-                "baseline_models": list(definition.baseline_models),
+                            for metric in self.metrics],
+                "comparison_test": component(self.comparison_test.specification),
+                "comparison_pairs": [list(pair) for pair in self.comparison_pairs],
+                "candidate_model": self.candidate_model,
+                "baseline_models": list(self.baseline_models),
             },
             "robustness": [component(check.specification) for check in self.diagnostic_checks],
             "plot": {"metric": self.plot_metric},
         }
-
-    def run(self, daily: pd.DataFrame) -> ExperimentResult:
-        return self.definition.run(daily, self.config)
 
 
 def standard_forecasters(*, target_horizon: TargetHorizon | None = None) -> tuple[Forecaster, ...]:
@@ -265,55 +254,20 @@ def standard_forecasters(*, target_horizon: TargetHorizon | None = None) -> tupl
     )
 
 
-@overload
-def standard_experiment_definition(
-    *, target_horizon: TargetHorizon | None = None,
-) -> ExperimentDefinition[WalkForwardSettings]: ...
-
-
-@overload
-def standard_experiment_definition(
-    *, executor_factory: ExperimentExecutorFactory[Settings, pd.DataFrame],
+def standard_experiment(
+    config: ExperimentConfig | None = None, *,
     target_horizon: TargetHorizon | None = None,
-) -> ExperimentDefinition[Settings]: ...
-
-
-def standard_experiment_definition(
-    *, executor_factory: ExperimentExecutorFactory[Settings, pd.DataFrame] | None = None,
-    target_horizon: TargetHorizon | None = None,
-) -> ExperimentDefinition[Settings] | ExperimentDefinition[WalkForwardSettings]:
-    """Assemble fresh standard components with the selected execution method."""
-    if executor_factory is None:
-        return standard_experiment_definition(
-            executor_factory=WalkForwardExperiment, target_horizon=target_horizon,
-        )
+) -> Experiment:
+    """Select fresh standard components and bind them to execution settings."""
     horizon = TargetHorizon() if target_horizon is None else target_horizon
-    return ExperimentDefinition(
+    return Experiment(
+        config=ExperimentConfig(execution=WalkForwardSettings()) if config is None else config,
         models=standard_forecasters(target_horizon=horizon),
         feature_builder=HARFeatureBuilder(),
         target_builder=RealizedVarianceTargetBuilder(horizon),
-        executor_factory=executor_factory,
         metrics=(QLikeMetric(), LogMSEMetric()),
         comparison_pairs=(("naive", "HAR"),),
         candidate_model="HAR",
         baseline_models=("naive", "EWMA", "AR1", "historical_mean"),
         comparison_test=DieboldMarianoTest(min_hac_lags=horizon.sessions - 1),
     )
-
-
-def holdout_experiment_definition(
-    *, target_horizon: TargetHorizon | None = None,
-) -> ExperimentDefinition[HoldoutSettings]:
-    """Assemble the standard components for fixed-cutoff holdout execution."""
-    return standard_experiment_definition(
-        executor_factory=HoldoutExperiment, target_horizon=target_horizon,
-    )
-
-
-def run_standard_forecast_experiment(
-    daily: pd.DataFrame,
-    config: ExperimentConfig[WalkForwardSettings],
-    *, target_horizon: TargetHorizon | None = None,
-) -> ExperimentResult:
-    """Build HAR features and run the standard model set on common windows."""
-    return standard_experiment_definition(target_horizon=target_horizon).run(daily, config)

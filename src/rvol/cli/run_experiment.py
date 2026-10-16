@@ -8,13 +8,13 @@ from pathlib import Path
 
 from rvol.cli._arguments import (
     add_forecast_arguments,
-    experiment_run_from_args,
+    experiment_from_args,
     forecast_dataset_snapshot,
     nonnegative_integer,
     positive_integer,
 )
-from rvol.domain import ExperimentResult, HoldoutSettings, WalkForwardSettings
-from rvol.forecasting.composition import ROBUSTNESS_CHECK_NAMES, ExperimentRun
+from rvol.domain import ExperimentResult
+from rvol.forecasting.composition import ROBUSTNESS_CHECK_NAMES, Experiment
 from rvol.forecasting.evaluation import EvaluationResult
 from rvol.infrastructure import ParquetDatasetRepository
 from rvol.presentation.reporting import (
@@ -59,7 +59,7 @@ def _print_evaluation(experiment: ExperimentResult, evaluation: EvaluationResult
 
 
 def _write_plot(
-    run: ExperimentRun[WalkForwardSettings] | ExperimentRun[HoldoutSettings],
+    run: Experiment,
     experiment: ExperimentResult,
     evaluation: EvaluationResult,
     output_dir: Path,
@@ -78,8 +78,8 @@ def _write_plot(
     target_dates = sorted({record.target_date for record in experiment.records})
     figure = plot_forecast_evaluation(
         experiment, evaluation,
-        candidate_model=run.definition.candidate_model,
-        baseline_models=run.definition.baseline_models,
+        candidate_model=run.candidate_model,
+        baseline_models=run.baseline_models,
         metric=run.plot_metric,
         title=(
             (f"{run.config.instrument} " if run.config.instrument else "")
@@ -129,15 +129,15 @@ def main() -> None:
     for option in ("check", "max_hac_lag", "top_errors"):
         if getattr(args, option) is not None and not args.robustness:
             parser.error(f"--{option.replace('_', '-')} requires --robustness")
-    run = experiment_run_from_args(parser, args)
+    run = experiment_from_args(parser, args)
 
     daily = ParquetDatasetRepository(args.daily).load()
     experiment = run.run(daily)
     if not experiment.records:
         raise SystemExit("no forecasts: add more data or lower --min-train-size")
-    evaluation = run.definition.evaluator().evaluate(experiment)
+    evaluation = run.evaluator().evaluate(experiment)
     robustness = (
-        run.definition.robustness_analyzer(checks=run.diagnostic_checks).analyze(
+        run.robustness_analyzer().analyze(
             experiment, evaluation=evaluation,
         ) if args.robustness else None
     )
@@ -146,7 +146,7 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     paths = list(ForecastArtifactWriter(output_dir).write(
         experiment, evaluation, config=run.config, dataset=dataset,
-        specification=run.definition.specification, configuration=configuration,
+        specification=run.specification, configuration=configuration,
     ).all())
     if args.plot:
         paths.extend(_write_plot(run, experiment, evaluation, output_dir, dataset, configuration))
