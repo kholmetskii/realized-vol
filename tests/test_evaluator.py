@@ -1,204 +1,225 @@
-from dataclasses import replace
-from datetime import date
-from typing import Any, cast
-
 import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.domain import (
+from rvol.evaluation import (
     ComparisonOutcome,
-    ComponentSpecification,
-    ExperimentConfig,
-    ExperimentResult,
-    WalkForwardSettings,
+    DieboldMarianoTest,
+    MAEMetric,
+    MSEMetric,
+    evaluate,
 )
-from rvol.forecasting.evaluation import ForecastEvaluator, ModelLossSummary
-from rvol.forecasting.execution import WalkForwardExperiment
-from rvol.forecasting.models import (
-    AR1Model,
-    EWMAModel,
-    HARModel,
-    HistoricalMeanModel,
-    NaiveModel,
-)
+from rvol.evaluation.comparison import diebold_mariano
+from rvol.evaluation.evaluator import validate_evaluation
 
 
-def feature_sample(n: int = 50, seed: int = 29) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    dates = pd.bdate_range("2022-01-03", periods=n + 1)
-    matrix = rng.normal(loc=-10.0, scale=0.5, size=(n, 3))
-    target = -0.4 + matrix @ np.array([0.5, 0.3, 0.15])
-    return pd.DataFrame({
-        "origin_date": dates[:-1],
-        "target_date": dates[1:],
-        "rv_daily": matrix[:, 0],
-        "rv_weekly": matrix[:, 1],
-        "rv_monthly": matrix[:, 2],
-        "target": target,
-    })
-
-
-def experiment_result(
-    *,
-    forecast_start: date | None = None,
-    forecast_end: date | None = None,
-) -> ExperimentResult:
-    experiment = WalkForwardExperiment(
-        models=(
-            HistoricalMeanModel(),
-            NaiveModel(),
-            EWMAModel(),
-            AR1Model(),
-            HARModel(),
-        ),
-        config=ExperimentConfig(
-            execution=WalkForwardSettings(min_train_size=20),
-            forecast_start=forecast_start,
-            forecast_end=forecast_end,
-        ),
+def sample_forecasts(n=20):
+    dates = pd.bdate_range("2024-01-02", periods=n)
+    return pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "model": model,
+                    "origin_date": dates - pd.Timedelta(days=1),
+                    "target_date": dates,
+                    "actual": np.linspace(-2, 3, n),
+                    "predicted": np.linspace(-2, 3, n) + error,
+                }
+            )
+            for model, error in (("baseline", 0.5), ("candidate", 0.2))
+        ],
+        ignore_index=True,
     )
-    return experiment.run(feature_sample())
 
 
-def test_evaluator_calculates_both_metrics_for_every_model():
-    evaluation = ForecastEvaluator(
-        comparison_pairs=(("naive", "HAR"),), hac_lags=3,
-    ).evaluate(experiment_result())
-
-    assert len(evaluation.losses) == 300
-    assert len(evaluation.summaries) == 10
-    assert {
-        (summary.model, summary.metric, summary.n_obs)
-        for summary in evaluation.summaries
-    } == {
-        (model, metric, 30)
-        for model in ("AR1", "EWMA", "HAR", "historical_mean", "naive")
-        for metric in ("QLIKE", "log-RV MSE")
+def test_evaluation_returns_tables_with_untransformed_per_case_losses():
+    forecasts = sample_forecasts()
+    unchanged = forecasts.copy(deep=True)
+    result = evaluate(forecasts, metrics=(MSEMetric(), MAEMetric()))
+    assert isinstance(result.losses, pd.DataFrame)
+    assert isinstance(result.summaries, pd.DataFrame)
+    expected = {
+        (model, metric): value
+        for model, error in (("baseline", 0.5), ("candidate", 0.2))
+        for metric, value in (("MSE", error**2), ("MAE", error))
     }
-    assert len(evaluation.comparisons) == 2
-    for comparison in evaluation.comparisons:
-        assert comparison.baseline_model == "naive"
-        assert comparison.candidate_model == "HAR"
-        assert comparison.candidate_mean_loss < comparison.baseline_mean_loss
-        assert comparison.mean_loss_difference > 0
-        assert comparison.p_value < 0.01
-        assert dict(comparison.test_parameters)["hac_lags"] == 3
+    for row in result.summaries.itertuples():
+        assert row.mean_loss == pytest.approx(expected[(str(row.model), str(row.metric))])
+        assert row.n_obs == 20
+    assert result.comparisons.empty
+    pd.testing.assert_frame_equal(forecasts, unchanged)
 
 
-def test_evaluator_supports_additional_pairwise_comparisons():
-    evaluator = ForecastEvaluator(
-        comparison_pairs=(("naive", "HAR"), ("AR1", "HAR")),
-        hac_lags=2,
-    )
+def test_minimal_custom_metric_and_comparison_need_no_specification():
+    class AbsoluteError:
+        name = "absolute"
 
-    evaluation = evaluator.evaluate(experiment_result())
+        def losses(self, actual, predicted):
+            return np.abs(actual - predicted)
 
-    assert len(evaluation.comparisons) == 4
-    assert {
-        (comparison.baseline_model, comparison.candidate_model)
-        for comparison in evaluation.comparisons
-    } == {("naive", "HAR"), ("AR1", "HAR")}
-
-
-def test_evaluator_scores_arbitrary_models_without_assuming_comparison_names():
-    experiment = ExperimentResult(records=tuple(
-        replace(record, model="custom")
-        for record in experiment_result().records
-        if record.model == "HAR"
-    ))
-
-    evaluation = ForecastEvaluator().evaluate(experiment)
-
-    assert len(evaluation.losses) == 60
-    assert {summary.model for summary in evaluation.summaries} == {"custom"}
-    assert evaluation.comparisons == ()
-
-
-def test_validation_and_test_evaluations_remain_date_disjoint():
-    features = feature_sample()
-    validation_start = cast(pd.Timestamp, features.loc[25, "target_date"]).date()
-    validation_end = cast(pd.Timestamp, features.loc[34, "target_date"]).date()
-    test_start = cast(pd.Timestamp, features.loc[35, "target_date"]).date()
-    validation = ForecastEvaluator().evaluate(
-        experiment_result(forecast_start=validation_start, forecast_end=validation_end)
-    )
-    final_test = ForecastEvaluator().evaluate(
-        experiment_result(forecast_start=test_start)
-    )
-
-    validation_dates = {record.target_date for record in validation.losses}
-    test_dates = {record.target_date for record in final_test.losses}
-    assert max(validation_dates) < min(test_dates)
-    assert validation_dates.isdisjoint(test_dates)
-
-
-def test_evaluator_rejects_misaligned_models_and_unknown_comparison_names():
-    complete = experiment_result()
-    missing_one = ExperimentResult(records=complete.records[:-1])
-
-    with pytest.raises(ValueError, match="identical target dates"):
-        ForecastEvaluator().evaluate(missing_one)
-    with pytest.raises(ValueError, match="unknown models"):
-        ForecastEvaluator(comparison_pairs=(("naive", "missing"),)).evaluate(complete)
-
-
-def test_evaluator_rejects_an_explicitly_empty_metric_collection():
-    with pytest.raises(ValueError, match="at least one"):
-        ForecastEvaluator(metrics=())
-
-
-def test_evaluator_uses_an_independent_comparison_test_and_preserves_loss_vectors():
     class CustomTest:
-        specification = ComponentSpecification(
-            "custom", "test.CustomTest", parameters=(("replications", 17),),
-        )
-
-        def __init__(self):
-            self.inputs: list[tuple[np.ndarray, np.ndarray]] = []
+        name = "custom"
 
         def compare(self, baseline_loss, candidate_loss):
-            self.inputs.append((baseline_loss.copy(), candidate_loss.copy()))
-            baseline_loss[:] = 0  # A third-party implementation cannot corrupt saved losses.
-            return ComparisonOutcome(12.0, 0.2, (("replications", 17),))
+            baseline_loss[:] = 0
+            candidate_loss[:] = 0
+            return ComparisonOutcome(1.2, 0.1, {"option": 2})
 
-    test = CustomTest()
-    evaluator = ForecastEvaluator(comparison_pairs=(("naive", "HAR"),), comparison_test=test)
-    result = evaluator.evaluate(experiment_result())
-    reference = ForecastEvaluator().evaluate(experiment_result())
-
-    assert result.losses == reference.losses
-    assert result.summaries == reference.summaries
-    assert result.comparison_test == test.specification
-    assert len(test.inputs) == 2
-    for comparison, (baseline, candidate) in zip(result.comparisons, test.inputs, strict=True):
-        assert comparison.test_name == "custom"
-        assert comparison.statistic == 12.0
-        assert comparison.p_value == 0.2
-        assert dict(comparison.test_parameters) == {"replications": 17}
-        assert comparison.mean_loss_difference == np.mean(baseline - candidate)
+    result = evaluate(
+        sample_forecasts(),
+        metrics=(AbsoluteError(),),
+        comparison_pairs=(("baseline", "candidate"),),
+        comparison_test=CustomTest(),
+    )
+    assert result.comparisons.test_name.tolist() == ["custom"]
+    assert result.comparisons.test_parameters.iloc[0] == {"option": 2}
+    assert result.losses.loss.min() > 0
+    assert not hasattr(AbsoluteError(), "specification")
 
 
-def test_injected_test_cannot_silently_ignore_a_hac_override():
-    from rvol.forecasting.evaluation import DieboldMarianoTest
+def test_pairwise_test_matches_the_existing_dm_formula():
+    forecasts = sample_forecasts()
+    result = evaluate(
+        forecasts,
+        comparison_pairs=(("baseline", "candidate"),),
+        comparison_test=DieboldMarianoTest(hac_lags=0),
+    )
+    pivot = result.losses.pivot(index="target_date", columns="model", values="loss")
+    expected = diebold_mariano(pivot.baseline, pivot.candidate, hac_lags=0)
+    actual = result.comparisons.iloc[0]
+    assert actual.statistic == expected.statistic
+    assert actual.p_value == expected.p_value
+    assert actual.mean_loss_difference == pytest.approx((pivot.baseline - pivot.candidate).mean())
 
-    with pytest.raises(ValueError, match="configure hac_lags on the injected"):
-        ForecastEvaluator(comparison_test=DieboldMarianoTest(), hac_lags=2)
+
+def test_default_dm_lag_selection_and_explicit_settings_match_the_numerical_test():
+    forecasts = sample_forecasts(20)
+    result = evaluate(forecasts, comparison_pairs=(("baseline", "candidate"),))
+    pivot = result.losses.pivot(index="target_date", columns="model", values="loss")
+    expected = diebold_mariano(pivot.baseline, pivot.candidate)
+    assert result.comparisons.test_parameters.iloc[0] == expected.parameters
+    explicit = evaluate(
+        forecasts,
+        comparison_pairs=(("baseline", "candidate"),),
+        comparison_test=DieboldMarianoTest(hac_lags=0),
+    )
+    assert explicit.comparisons.test_parameters.iloc[0]["hac_lags"] == 0
 
 
 @pytest.mark.parametrize(
-    "changes, message",
+    "values",
+    [np.array([np.nan]), np.array([-1.0]), np.empty(0), np.ones((20, 1)), np.full(20, np.inf)],
+)
+def test_invalid_metric_outputs_are_rejected(values):
+    class Invalid:
+        name = "invalid"
+
+        def losses(self, actual, predicted):
+            return values
+
+    with pytest.raises(ValueError, match="finite non-negative"):
+        evaluate(sample_forecasts(), metrics=(Invalid(),))
+
+
+@pytest.mark.parametrize(
+    "options",
     [
-        ({"model": ""}, "model"),
-        ({"metric": ""}, "metric"),
-        ({"n_obs": 0}, "positive"),
-        ({"mean_loss": -1.0}, "non-negative"),
-        ({"mean_loss": float("nan")}, "finite"),
+        {"metrics": ()},
+        {"metrics": (MSEMetric(), MSEMetric())},
+        {"comparison_pairs": (("missing", "candidate"),)},
+        {"comparison_pairs": (("candidate", "candidate"),)},
+        {"comparison_pairs": (("baseline", "candidate"), ("baseline", "candidate"))},
     ],
 )
-def test_model_loss_summary_rejects_invalid_evaluation_values(changes, message):
-    values = {"model": "HAR", "metric": "QLIKE", "n_obs": 20, "mean_loss": 0.1}
-    values.update(changes)
+def test_invalid_metric_and_comparison_choices_are_rejected(options):
+    with pytest.raises(ValueError):
+        evaluate(sample_forecasts(), **options)
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "duplicate",
+        "missing_date",
+        "different_actual",
+        "different_origin",
+        "nonfinite_actual",
+        "nonfinite_prediction",
+        "empty_model",
+        "mixed_run",
+        "invalid_interval",
+        "partial_fit_dates",
+        "future_fit",
+        "empty",
+    ],
+)
+def test_invalid_or_misaligned_forecast_tables_are_rejected(corruption):
+    frame = sample_forecasts()
+    if corruption == "duplicate":
+        frame = pd.concat([frame, frame.iloc[:1]])
+    elif corruption == "missing_date":
+        frame = frame.drop(index=0)
+    elif corruption == "different_actual":
+        frame.loc[0, "actual"] += 1
+    elif corruption == "different_origin":
+        frame.loc[0, "origin_date"] -= pd.Timedelta(days=1)
+    elif corruption == "nonfinite_actual":
+        frame.loc[0, "actual"] = np.nan
+    elif corruption == "nonfinite_prediction":
+        frame.loc[0, "predicted"] = np.inf
+    elif corruption == "empty_model":
+        frame.loc[0, "model"] = ""
+    elif corruption == "mixed_run":
+        frame["run_id"] = "one"
+        frame.loc[0, "run_id"] = "two"
+    elif corruption == "invalid_interval":
+        frame.loc[0, "origin_date"] = frame.loc[0, "target_date"]
+    elif corruption == "partial_fit_dates":
+        frame["fit_date"] = frame.origin_date
+    elif corruption == "future_fit":
+        frame["train_start_date"], frame["train_end_date"] = frame.origin_date, frame.origin_date
+        frame["fit_date"] = frame.target_date
+    else:
+        frame = frame.iloc[:0]
+    with pytest.raises(ValueError):
+        evaluate(frame)
+
+
+@pytest.mark.parametrize("consumer", ["evaluate", "validate_evaluation"])
+@pytest.mark.parametrize("problem", ["unaligned", "mixed_run", "mixed_fold"])
+def test_evaluation_consumers_enforce_one_run_and_a_common_sample(consumer, problem):
+    frame = sample_forecasts()
+    evaluation = evaluate(frame)
+    if problem == "unaligned":
+        selected = frame.model == "candidate"
+        frame.loc[selected, ["origin_date", "target_date"]] += pd.Timedelta(days=30)
+        message = "identical dates and actual values"
+    else:
+        column = "run_id" if problem == "mixed_run" else "fold_id"
+        frame[column] = "first"
+        frame.loc[0, column] = "second"
+        message = "each run/fold separately"
 
     with pytest.raises(ValueError, match=message):
-        ModelLossSummary(**cast(Any, values))
+        if consumer == "evaluate":
+            evaluate(frame)
+        else:
+            validate_evaluation(frame, evaluation)
+
+
+@pytest.mark.parametrize(
+    "corruption", ["prediction", "tiny_prediction", "missing_loss", "duplicate_loss"]
+)
+def test_reports_cannot_reuse_an_evaluation_of_different_forecasts(corruption):
+    forecasts = sample_forecasts()
+    evaluation = evaluate(forecasts, comparison_pairs=(("baseline", "candidate"),))
+    if corruption == "prediction":
+        forecasts.predicted += 1
+    elif corruption == "tiny_prediction":
+        forecasts.predicted += 1e-10
+    elif corruption == "missing_loss":
+        evaluation.losses = evaluation.losses.iloc[1:]
+    else:
+        evaluation.losses = pd.concat([evaluation.losses, evaluation.losses.iloc[:1]])
+    with pytest.raises(ValueError):
+        validate_evaluation(forecasts, evaluation)

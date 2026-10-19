@@ -10,14 +10,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.data.market.sampling import grid_origins
 from rvol.data.market.sessions import full_sessions, trading_day
-from rvol.data.realized import (
-    sampled_realized_variance,
-    subsampled_realized_variance,
-)
-from rvol.diagnostics.microstructure import noise_test
-from rvol.diagnostics.signature import signature
+from rvol.estimators.diagnostics import noise_test, signature
 
 SIGMA_ANN = 0.10
 N_DAYS = 20
@@ -196,44 +190,3 @@ def test_pairing_beats_comparing_two_averages():
     assert result.se_log_ratio < unpaired_se / 1.5, (
         f"paired se {result.se_log_ratio:.4f} vs unpaired {unpaired_se:.4f}"
     )
-
-
-def test_grid_offsets_cover_one_interval_exactly():
-    prices = pd.Series(
-        1.0, index=pd.date_range("2024-01-15 22:00", periods=10, freq="1min", tz="UTC")
-    )
-    origins = grid_origins(prices, "5min", n_grids=5)
-    assert len(origins) == 5
-    gaps = {(b - a) for a, b in zip(origins[:-1], origins[1:], strict=True)}
-    assert gaps == {pd.Timedelta(seconds=60)}
-
-
-@pytest.mark.slow
-def test_subsampling_lies_inside_the_spread_of_single_grids():
-    """It is the average of the grids, so it can never be an outlier."""
-    df = build_paths()
-    s = df.set_index("ts")["true"]
-
-    singles = [
-        sampled_realized_variance(s, "5min", origin=o)
-        for o in grid_origins(s, "5min", n_grids=12)
-    ]
-    avg = subsampled_realized_variance(s, "5min", n_grids=12)
-
-    assert min(singles) <= avg <= max(singles)
-    assert abs(avg / np.mean(singles) - 1) < 1e-12
-    assert max(singles) / min(singles) > 1.02, "grids should disagree at all"
-
-
-@pytest.mark.slow
-def test_subsampling_is_more_stable_than_one_grid():
-    """Same paths, ten seeds: averaging the grids should scatter less."""
-    single, avg = [], []
-    for seed in range(10):
-        s = build_paths(seed).set_index("ts")["true"]
-        single.append(sampled_realized_variance(s, "5min"))
-        avg.append(subsampled_realized_variance(s, "5min", n_grids=12))
-
-    single_cv = np.std(single, ddof=1) / np.mean(single)
-    avg_cv = np.std(avg, ddof=1) / np.mean(avg)
-    assert avg_cv < single_cv, f"single {single_cv:.4f} vs averaged {avg_cv:.4f}"

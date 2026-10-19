@@ -55,6 +55,6 @@ jobs:
       - name: Install package and development dependencies
         run: python -m pip install -e ".[dev]"
       - name: Run Ruff
-        run: ruff check src tests scripts experiments
+        run: ruff check src tests notebooks
       - name: Run Mypy
-        run: mypy src tests experiments
+        run: mypy src tests

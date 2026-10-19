@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from rvol.data.coverage import audit_daily_dataset
+from rvol.data.volatility.coverage import audit_daily_dataset
 
 
 def daily_sample(n_sessions: int = 30) -> pd.DataFrame:

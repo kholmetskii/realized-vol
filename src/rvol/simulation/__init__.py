@@ -1,1 +1,1 @@
-"""Path generators with known true volatility."""
+"""Simulated prices with known integrated variance, for validating RV estimators."""

@@ -42,3 +42,19 @@ def simulate_heston(
 
     integrated_var = float(np.sum(v[:-1]) * dt)
     return np.exp(log_s), v, integrated_var
+
+
+def cumulative_integrated_variance(variance: np.ndarray, dt: float) -> np.ndarray:
+    """Running integrated variance along a simulated variance path.
+
+    Uses the same left Riemann sum as :func:`simulate_heston`, so the last value
+    equals the integrated variance it returns.
+    """
+    values = np.asarray(variance, dtype=np.float64)
+    if values.ndim != 1 or len(values) < 2:
+        raise ValueError("variance must be a one-dimensional path with at least two values")
+    if not np.all(np.isfinite(values)) or np.any(values < 0):
+        raise ValueError("variance must be finite and non-negative")
+    if not np.isfinite(dt) or dt <= 0:
+        raise ValueError("dt must be finite and positive")
+    return np.r_[0.0, np.cumsum(values[:-1]) * dt]

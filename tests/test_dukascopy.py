@@ -10,7 +10,7 @@ import urllib.request
 import pandas as pd
 import pytest
 
-from rvol.data.dukascopy import (
+from rvol.data.sources.dukascopy import (
     FetchError,
     decode_hour,
     fetch_hour,
@@ -178,7 +178,7 @@ def test_one_bad_hour_does_not_lose_the_rest(tmp_path, monkeypatch):
         urllib.request, "urlopen",
         lambda req, timeout=None: (_ for _ in ()).throw(http_error(503)),
     )
-    monkeypatch.setattr("rvol.data.dukascopy.time.sleep", lambda _: None)
+    monkeypatch.setattr("rvol.data.sources.dukascopy.time.sleep", lambda _: None)
 
     ticks, failed = fetch_range(
         "EURUSD", HOUR.date(), HOUR.date(), cache=tmp_path,

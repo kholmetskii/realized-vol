@@ -1,1 +1,1 @@
-"""Market data acquisition, session preparation, daily variance, and coverage."""
+"""Acquire, persist and prepare observations for numerical forecasting."""

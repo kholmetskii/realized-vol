@@ -3,8 +3,8 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
-from rvol.data.dataset import build_daily_dataset
-from rvol.data.realized import sampled_realized_variance
+from rvol.data.volatility.dataset import build_daily_dataset
+from rvol.estimators.realized import sampled_realized_variance
 
 
 def two_sessions() -> pd.DataFrame:

@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from rvol.domain import ComparisonOutcome
-from rvol.forecasting.evaluation import DieboldMarianoTest
-from rvol.forecasting.evaluation.comparison import diebold_mariano
+from rvol.evaluation import DieboldMarianoTest
+from rvol.evaluation.comparison import diebold_mariano
+from rvol.evaluation.contracts import ComparisonOutcome
 
 
 def test_comparison_detects_lower_candidate_loss():
@@ -18,10 +18,9 @@ def test_comparison_detects_lower_candidate_loss():
         hac_lags=3,
     )
 
-    assert result.mean_loss_difference > 0
     assert result.statistic > 0
     assert result.p_value < 0.01
-    assert result.hac_lags == 3
+    assert result.parameters == {"hac_lags": 3}
 
 
 def test_identical_loss_sequences_give_no_evidence_of_a_difference():
@@ -29,7 +28,6 @@ def test_identical_loss_sequences_give_no_evidence_of_a_difference():
 
     result = diebold_mariano(losses, losses)
 
-    assert result.mean_loss_difference == 0
     assert result.statistic == 0
     assert result.p_value == 0.5
 
@@ -53,13 +51,19 @@ def test_configured_dm_adapter_preserves_the_existing_formula_and_records_resolv
 
     outcome = test.compare(baseline, candidate)
 
-    assert outcome.statistic == reference.statistic
-    assert outcome.p_value == reference.p_value
-    assert dict(outcome.parameters) == {"hac_lags": reference.hac_lags}
-    assert dict(test.specification.parameters)["hac_lags"] is None
+    assert outcome == reference
+    assert test.hac_lags is None
 
 
 @pytest.mark.parametrize("statistic, p_value", [(float("nan"), 0.5), (0, -0.1), (0, 1.1)])
 def test_comparison_outcomes_reject_invalid_values(statistic, p_value):
     with pytest.raises(ValueError):
         ComparisonOutcome(statistic, p_value)
+
+
+def test_default_comparison_parameters_are_independent_for_each_result():
+    first = ComparisonOutcome(0.0, 0.5)
+    second = ComparisonOutcome(0.0, 0.5)
+    first.parameters["option"] = 1
+
+    assert second.parameters == {}

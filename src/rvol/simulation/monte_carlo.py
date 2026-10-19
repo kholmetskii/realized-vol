@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,22 +11,36 @@ PathSimulator = Callable[[np.random.Generator], tuple[NDArray[np.float64], float
 VarianceEstimator = Callable[[NDArray[np.float64]], float]
 
 
-@dataclass(frozen=True)
 class MonteCarloSummary:
     """Sampling performance of one estimator over repeated paths."""
 
-    estimator: str
-    n_replications: int
-    mean_estimate: float
-    mean_target: float
-    bias: float
-    bias_se: float
-    rmse: float
+    def __init__(
+        self,
+        estimator: str,
+        n_replications: int,
+        mean_estimate: float,
+        mean_target: float,
+        bias: float,
+        bias_se: float,
+        rmse: float,
+    ) -> None:
+        self.estimator = estimator
+        self.n_replications = n_replications
+        self.mean_estimate = mean_estimate
+        self.mean_target = mean_target
+        self.bias = bias
+        self.bias_se = bias_se
+        self.rmse = rmse
 
     @property
     def relative_bias(self) -> float:
         """Bias divided by the average latent integrated variance."""
         return self.bias / self.mean_target
+
+    @property
+    def relative_rmse(self) -> float:
+        """RMSE divided by the average latent integrated variance."""
+        return self.rmse / self.mean_target
 
 
 def evaluate_estimators(
@@ -66,13 +79,15 @@ def evaluate_estimators(
     summaries = []
     for name, values in estimates.items():
         errors = values - targets
-        summaries.append(MonteCarloSummary(
-            estimator=name,
-            n_replications=n_replications,
-            mean_estimate=float(np.mean(values)),
-            mean_target=float(np.mean(targets)),
-            bias=float(np.mean(errors)),
-            bias_se=float(np.std(errors, ddof=1) / np.sqrt(n_replications)),
-            rmse=float(np.sqrt(np.mean(errors**2))),
-        ))
+        summaries.append(
+            MonteCarloSummary(
+                estimator=name,
+                n_replications=n_replications,
+                mean_estimate=float(np.mean(values)),
+                mean_target=float(np.mean(targets)),
+                bias=float(np.mean(errors)),
+                bias_se=float(np.std(errors, ddof=1) / np.sqrt(n_replications)),
+                rmse=float(np.sqrt(np.mean(errors**2))),
+            )
+        )
     return tuple(summaries)

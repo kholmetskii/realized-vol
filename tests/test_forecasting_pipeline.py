@@ -1,143 +1,186 @@
-"""Characterization tests for the canonical forecasting pipeline.
-
-These assertions intentionally lock the current end-to-end behavior. Update
-the golden values only when a numerical or alignment change is deliberate.
-HAR expectations include the variance correction from each training window.
-"""
+import subprocess
+import sys
+from datetime import date
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.domain import ExperimentConfig, WalkForwardSettings
-from rvol.forecasting.evaluation import ForecastEvaluator
-from rvol.forecasting.execution import WalkForwardExperiment, prepare_forecast_data
-from rvol.forecasting.features import build_har_features
-from rvol.forecasting.models import HARModel, NaiveModel
-from rvol.forecasting.targets import RealizedVarianceTargetBuilder
+from rvol import experiment
+from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
+from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
+from rvol.data.volatility.features import VarianceFeatureBuilder
+from rvol.evaluation import evaluate
+from tests.forecasting_helpers import benchmark_models, daily_sample, prepared_variance
 
 
-@pytest.fixture(scope="module")
-def characterized_pipeline():
-    n_sessions = 90
-    step = np.arange(n_sessions, dtype="float64")
-    log_rv = (
-        -10.0
-        + 0.3 * np.sin(step / 3)
-        + 0.15 * np.cos(step / 7)
-        + 0.002 * step
-    )
-    daily = pd.DataFrame({
-        "date": pd.bdate_range("2020-01-02", periods=n_sessions),
-        "rv_5min": np.exp(log_rv),
-        "log_rv": log_rv,
-        "observation_count": np.full(n_sessions, 288),
-    })
-    features = prepare_forecast_data(
-        build_har_features(daily), RealizedVarianceTargetBuilder()(daily),
-    )
-    experiment = WalkForwardExperiment(
-        models=(NaiveModel(), HARModel()),
-        config=ExperimentConfig(execution=WalkForwardSettings(min_train_size=25)),
-    ).run(features)
-    evaluation = ForecastEvaluator(
-        comparison_pairs=(("naive", "HAR"),), hac_lags=3,
-    ).evaluate(experiment)
-    return features, experiment, evaluation
+def test_changing_future_data_cannot_change_earlier_predictions():
+    daily = daily_sample()
+    changed = daily.copy()
+    changed.loc[65:, "log_rv"] += 1
+    cutoff = daily.date.iloc[65]
+    runner = WalkForwardRunner(WalkForwardPlanner(min_train_size=15, refit_every=5))
+    for model, columns in benchmark_models():
+
+        def prepare(frame, selected=columns):
+            return prepare_forecast_data(
+                VarianceFeatureBuilder(feature_names=selected)(frame),
+                build_next_observation_targets(frame, value_col="log_rv"),
+            )
+
+        first = runner.run(prepare(daily), model=model, feature_columns=columns)
+        second = runner.run(prepare(changed), model=model, feature_columns=columns)
+        pd.testing.assert_series_equal(
+            first.loc[first.origin_date < cutoff, "predicted"],
+            second.loc[second.origin_date < cutoff, "predicted"],
+        )
 
 
-def test_walk_forward_pipeline_matches_current_alignment_and_predictions(
-    characterized_pipeline,
-):
-    features, experiment, _ = characterized_pipeline
+def test_forecasting_and_experiment_imports_do_not_load_matplotlib():
+    code = """
+import sys
+import pandas as pd
+from rvol.data.preparation import prepare_forecast_data
+from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
+from rvol.data.preparation import build_next_observation_targets
+from rvol.models import AR1Model
+from rvol.evaluation import evaluate
+from rvol import experiment
+data = pd.DataFrame({'date': pd.date_range('2024-01-01', periods=20), 'value': range(20)})
+features = pd.DataFrame({'origin_date': data.date, 'lag_0': data.value.astype(float)})
+prepared = prepare_forecast_data(features, build_next_observation_targets(data))
+forecasts = WalkForwardRunner(WalkForwardPlanner(min_train_size=5)).run(
+    prepared, model=AR1Model(), feature_columns=("lag_0",)
+)
+evaluate(forecasts)
+assert 'matplotlib' not in sys.modules
+"""
+    completed = subprocess.run([sys.executable, "-c", code], text=True, capture_output=True)
+    assert completed.returncode == 0, completed.stderr
 
-    assert len(features) == 68
-    assert features.loc[0, "origin_date"] == pd.Timestamp("2020-01-31")
-    assert features.loc[0, "target_date"] == pd.Timestamp("2020-02-03")
-    assert features.loc[67, "origin_date"] == pd.Timestamp("2020-05-05")
-    assert features.loc[67, "target_date"] == pd.Timestamp("2020-05-06")
 
-    by_model = {
-        model: [record for record in experiment.records if record.model == model]
-        for model in experiment.models
-    }
-    naive = by_model["naive"]
-    har = by_model["HAR"]
+def test_importing_models_and_runner_loads_no_preparation_or_evaluation():
+    code = """
+import sys
+from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
+from rvol.models import AR1Model
+for prefix in ('rvol.data', 'rvol.evaluation', 'rvol.experiment', 'rvol.simulation',
+               'matplotlib', 'scipy'):
+    assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
+"""
+    completed = subprocess.run([sys.executable, "-c", code], text=True, capture_output=True)
+    assert completed.returncode == 0, completed.stderr
 
-    assert experiment.n_forecasts == 86
-    assert len(naive) == len(har) == 43
-    assert har[0].origin_date == pd.Timestamp("2020-03-06").date()
-    assert har[0].target_date == pd.Timestamp("2020-03-09").date()
-    assert har[42].origin_date == pd.Timestamp("2020-05-05").date()
-    assert har[42].target_date == pd.Timestamp("2020-05-06").date()
-    np.testing.assert_array_equal([record.n_train for record in har], np.arange(25, 68))
 
-    selected = np.array([
-        [har[index].actual_log_rv, naive[index].predicted_log_rv, har[index].predicted_log_rv]
-        for index in (0, 21, 42)
-    ])
-    expected = np.array([
-        [-9.757338569918984, -9.654409842525581, -9.81262938523659],
-        [-10.195348190910776, -10.115053704270585, -10.18040187219842],
-        [-9.968873206979659, -9.9355616903085, -10.009187806732454],
-    ])
-    np.testing.assert_allclose(selected, expected, rtol=1e-10, atol=1e-10)
-    np.testing.assert_allclose(
-        [
-            sum(record.predicted_log_rv for record in har),
-            sum(record.predicted_log_rv for record in naive),
-            sum(record.actual_log_rv for record in har),
-        ],
-        [-425.4709423658551, -424.8527856107647, -425.16724897521885],
-        rtol=1e-10,
-        atol=1e-10,
+def daily_series(n: int = 600) -> pd.DataFrame:
+    rng = np.random.default_rng(23)
+    return pd.DataFrame(
+        {
+            "date": pd.bdate_range("2023-01-03", periods=n),
+            "log_rv": -10 + np.sin(np.arange(n) / 4) / 5 + rng.normal(0, 0.3, n),
+        }
     )
 
 
-def test_statistical_comparison_matches_current_pipeline(characterized_pipeline):
-    _, _, evaluation = characterized_pipeline
-    by_metric = {result.metric: result for result in evaluation.comparisons}
-
-    qlike = by_metric["QLIKE"]
-    assert qlike.n_obs == 43
-    assert dict(qlike.test_parameters)["hac_lags"] == 3
-    np.testing.assert_allclose(
-        [
-            qlike.baseline_mean_loss,
-            qlike.candidate_mean_loss,
-            qlike.mean_loss_difference,
-            qlike.statistic,
-            qlike.p_value,
-        ],
-        [
-            0.002657592022619984,
-            0.00029172650971693394,
-            0.00236586551290305,
-            4.779358110184867,
-            8.792786297935597e-07,
-        ],
-        rtol=1e-9,
-        atol=1e-12,
+def runner_for(window: Literal["expanding", "rolling"] = "expanding") -> WalkForwardRunner:
+    return WalkForwardRunner(
+        WalkForwardPlanner(
+            window=window,
+            window_size=252 if window == "rolling" else None,
+            min_train_size=252,
+            forecast_start=date(2024, 10, 1),
+            forecast_end=date(2026, 9, 30),
+        )
     )
 
-    log_mse = by_metric["log-RV MSE"]
-    assert log_mse.n_obs == 43
-    assert dict(log_mse.test_parameters)["hac_lags"] == 3
-    np.testing.assert_allclose(
-        [
-            log_mse.baseline_mean_loss,
-            log_mse.candidate_mean_loss,
-            log_mse.mean_loss_difference,
-            log_mse.statistic,
-            log_mse.p_value,
-        ],
-        [
-            0.005315602810634525,
-            0.0005788184668746995,
-            0.004736784343759825,
-            4.916822639473957,
-            4.398008759862686e-07,
-        ],
-        rtol=1e-9,
-        atol=1e-12,
+
+EVALUATION_START = date(2025, 1, 1)
+
+
+@pytest.mark.parametrize(
+    "window, custom_model", [("expanding", False), ("rolling", False), ("expanding", True)]
+)
+def test_compare_scores_log_and_smeared_variance_forecasts_on_the_same_dates(window, custom_model):
+    from rvol.models import ConstantPredictor
+
+    class CustomMean:
+        name = "custom_mean"
+
+        def fit(self, features, target):
+            return ConstantPredictor(float(np.mean(target)), n_features=features.shape[1])
+
+    models = experiment.benchmark_models()
+    if custom_model:
+        models = (*models[1:], (CustomMean(), ()))
+    forecasts = experiment.forecast(
+        experiment.prepare(daily_series()), models, runner_for(window), run_id="test"
     )
+
+    comparison = experiment.compare(forecasts, evaluation_start=EVALUATION_START)
+
+    names = {model.name for model, _ in models}
+    scales = ((comparison.log_rv, "log-RV MSE"), (comparison.variance, "QLIKE"))
+    for scale, metric in scales:
+        assert set(scale.evaluation.summaries.model) == names
+        assert set(scale.evaluation.summaries.metric) == {metric}
+        assert set(scale.evaluation.comparisons.candidate_model) == {"HAR"}
+        assert scale.forecasts.target_date.min() >= pd.Timestamp(EVALUATION_START)
+        assert {"win_rates", "hac_sensitivity", "monthly_losses"} <= set(scale.robustness)
+    pd.testing.assert_frame_equal(
+        comparison.log_rv.forecasts[["model", "target_date"]],
+        comparison.variance.forecasts[["model", "target_date"]],
+    )
+    variance = comparison.variance.forecasts
+    assert (variance.smearing_factor > 0).all()
+    assert (variance.actual > 0).all() and (variance.predicted > 0).all()
+    if window == "rolling":
+        assert set(variance.n_train) == {252}
+
+
+def test_results_table_summarises_both_evaluations():
+    forecasts = experiment.forecast(
+        experiment.prepare(daily_series()), experiment.benchmark_models(), runner_for()
+    )
+    comparison = experiment.compare(forecasts, evaluation_start=EVALUATION_START)
+
+    table = experiment.results_table(comparison)
+
+    qlike = comparison.variance.evaluation.summaries.set_index("model").mean_loss
+    pd.testing.assert_series_equal(table["QLIKE"], qlike.loc[table.index], check_names=False)
+    assert table["QLIKE"].is_monotonic_increasing
+    assert table.loc["HAR", "QLIKE: HAR lower by"] == 0
+    tests = comparison.log_rv.evaluation.comparisons.set_index("baseline_model").p_value
+    np.testing.assert_allclose(table.loc[tests.index, "log-RV MSE: DM p-value"], tests)
+    assert pd.isna(table.loc["HAR", "HAR wins (QLIKE)"])
+
+
+def test_compare_rejects_a_missing_candidate_or_an_empty_window():
+    forecasts = experiment.forecast(
+        experiment.prepare(daily_series()), experiment.benchmark_models()[:2], runner_for()
+    )
+    with pytest.raises(ValueError, match="candidate"):
+        experiment.compare(forecasts, evaluation_start=EVALUATION_START)
+    with pytest.raises(ValueError, match="evaluation_start"):
+        experiment.compare(forecasts, evaluation_start=date(2030, 1, 1), candidate="naive")
+
+
+def test_forecast_requires_at_least_one_model():
+    with pytest.raises(ValueError, match="at least one model"):
+        experiment.forecast(experiment.prepare(daily_series()), (), runner_for())
+
+
+def test_separate_models_share_an_explicit_comparison_sample():
+    data = prepared_variance()
+    runner = WalkForwardRunner(WalkForwardPlanner(min_train_size=15))
+    forecasts = pd.concat(
+        [
+            runner.run(data, model=model, feature_columns=columns)
+            for model, columns in benchmark_models()
+        ],
+        ignore_index=True,
+    )
+    evaluation = evaluate(forecasts, comparison_pairs=(("naive", "HAR"),))
+    assert len(evaluation.summaries) == 5
+    assert forecasts.groupby("model").target_date.apply(list).map(tuple).nunique() == 1
+    assert len(evaluation.comparisons) == 1
