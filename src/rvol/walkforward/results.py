@@ -18,15 +18,13 @@ FORECAST_COLUMNS = (
     "fit_date",
     "train_start_date",
     "train_end_date",
-    "run_id",
-    "fold_id",
+    "asset",
 )
 CASE_COLUMNS = (
     "model",
     "origin_date",
     "target_date",
-    "run_id",
-    "fold_id",
+    "asset",
 )
 
 
@@ -44,7 +42,7 @@ def forecast_frame(rows: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
 
 
 def validated_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """Copy and validate forecast records, allowing different runs and samples."""
+    """Copy and validate forecast records, allowing several assets and samples."""
     required = {"model", "origin_date", "target_date", "actual", "predicted"}
     missing = required.difference(forecasts.columns)
     if not forecasts.columns.is_unique or missing:
@@ -52,38 +50,27 @@ def validated_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
     if forecasts.empty:
         raise ValueError("forecasts must not be empty")
     frame = forecasts.copy()
-    defaults: dict[str, Any] = {
-        "run_id": "default",
-        "fold_id": None,
-    }
-    for name, value in defaults.items():
-        if name not in frame:
-            frame[name] = value
+    if "asset" not in frame:
+        frame["asset"] = "default"
     for column in ("origin_date", "target_date"):
         frame[column] = pd.to_datetime(frame[column], errors="raise")
         if frame[column].isna().any():
             raise ValueError("forecast dates must be valid")
-    for column in ("model", "run_id"):
+    for column in ("model", "asset"):
         if (
             not frame[column]
             .map(lambda value: isinstance(value, str) and bool(value.strip()))
             .all()
         ):
             raise ValueError(f"{column} must contain non-empty strings")
-    if (
-        not frame["fold_id"]
-        .map(lambda value: pd.isna(value) or isinstance(value, str) and bool(value.strip()))
-        .all()
-    ):
-        raise ValueError("fold_id must contain non-empty strings or missing values")
     numbers = frame[["actual", "predicted"]].apply(pd.to_numeric, errors="raise")
     if not np.isfinite(numbers.to_numpy(dtype="float64")).all():
         raise ValueError("forecast values must be finite")
     frame[["actual", "predicted"]] = numbers
     if not (frame.origin_date < frame.target_date).all():
         raise ValueError("target dates must follow their forecast origins")
-    if frame.duplicated(["run_id", "fold_id", "model", "target_date"]).any():
-        raise ValueError("each model must have one forecast per target date within a run/fold")
+    if frame.duplicated(["asset", "model", "target_date"]).any():
+        raise ValueError("each model must have one forecast per target date within an asset")
     if "n_train" in frame and (
         not pd.to_numeric(frame.n_train, errors="raise")
         .map(lambda value: not isinstance(value, bool) and value >= 1 and int(value) == value)

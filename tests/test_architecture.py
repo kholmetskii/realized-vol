@@ -9,9 +9,9 @@ PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[1] / "src" / "rvol"
 PACKAGE_DEPENDENCIES = {
     "": set(),
     "models": {"models"},
-    "backtesting": {"backtesting", "models"},
-    "evaluation": {"evaluation", "backtesting", "models"},
-    "evaluation.volatility": {"evaluation", "backtesting", "models"},
+    "walkforward": {"walkforward", "models"},
+    "evaluation": {"evaluation", "walkforward", "models"},
+    "evaluation.volatility": {"evaluation", "walkforward", "models"},
     "data": set(),
     "data.preparation": set(),
     "data.sources": set(),
@@ -19,10 +19,9 @@ PACKAGE_DEPENDENCIES = {
     "data.volatility": {"data.volatility", "data.market", "estimators"},
     "estimators": {"estimators", "estimators.variance", "data.market"},
     "estimators.variance": set(),
-    "simulation": {"simulation"},
     "experiment": {
         "experiment",
-        "backtesting",
+        "walkforward",
         "data.preparation",
         "data.volatility",
         "evaluation",
@@ -98,7 +97,7 @@ def test_clean_architecture_dependency_direction(package: str):
 
 def test_models_have_no_required_specification_or_domain_layer():
     assert not (PACKAGE_ROOT / "domain").exists()
-    for package in ("models", "backtesting"):
+    for package in ("models", "walkforward"):
         for path in (PACKAGE_ROOT / package).rglob("*.py"):
             tree = ast.parse(path.read_text())
             assert not any(

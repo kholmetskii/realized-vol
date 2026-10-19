@@ -1,6 +1,6 @@
 """The realized-variance forecast comparison: prepare, forecast, evaluate.
 
-A notebook calls these functions in order:
+Call these functions in order:
 
     prepared = prepare(daily)
     forecasts = forecast(prepared, benchmark_models(), runner)
@@ -20,13 +20,13 @@ from datetime import date
 
 import pandas as pd
 
-from rvol.backtesting import WalkForwardRunner
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
 from rvol.data.volatility.features import VarianceFeatureBuilder
 from rvol.evaluation import EvaluationResult, analyze_robustness, evaluate
 from rvol.evaluation.volatility import LogMSEMetric, QLikeMetric, variance_forecasts
 from rvol.models import AR1Model, EWMAModel, HARModel, HistoricalMeanModel, NaiveModel
 from rvol.models.contracts import ForecastModel
+from rvol.walkforward import WalkForwardRunner
 
 HAR_FEATURES = ("log_rv_daily", "log_rv_weekly", "log_rv_monthly")
 
@@ -60,13 +60,13 @@ def forecast(
     models: Sequence[ModelSpec],
     runner: WalkForwardRunner,
     *,
-    run_id: str = "default",
+    asset: str = "default",
 ) -> pd.DataFrame:
     """Run every model walk-forward and stack their log-RV forecasts."""
     if not models:
         raise ValueError("at least one model is required")
     runs = [
-        runner.run(prepared, model=model, feature_columns=columns, run_id=run_id)
+        runner.run(prepared, model=model, feature_columns=columns, asset=asset)
         for model, columns in models
     ]
     return pd.concat(runs, ignore_index=True)

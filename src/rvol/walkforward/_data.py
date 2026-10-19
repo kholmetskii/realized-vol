@@ -45,13 +45,10 @@ def validated_data(features: pd.DataFrame, feature_names: Sequence[str]) -> pd.D
 def validate_run(
     model: ForecastModel,
     feature_columns: Sequence[str],
-    run_id: str,
-    fold_id: str | None,
+    asset: str,
 ) -> None:
-    for name, label in (("model name", model.name), ("run_id", run_id), ("fold_id", fold_id)):
-        if (name != "fold_id" or label is not None) and (
-            not isinstance(label, str) or not label.strip()
-        ):
+    for name, label in (("model name", model.name), ("asset", asset)):
+        if not isinstance(label, str) or not label.strip():
             raise ValueError(f"{name} must be a non-empty string")
     reserved = {
         "target",

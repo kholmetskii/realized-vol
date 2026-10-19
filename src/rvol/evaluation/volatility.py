@@ -11,9 +11,9 @@ import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
 
-from rvol.backtesting.results import validated_forecasts
 from rvol.evaluation.metrics import MSEMetric
 from rvol.models.contracts import FloatArray
+from rvol.walkforward.results import validated_forecasts
 
 
 def _finite_vector(values: ArrayLike, name: str) -> NDArray[np.float64]:
@@ -71,7 +71,7 @@ def variance_forecasts(forecasts: pd.DataFrame, *, min_errors: int = 20) -> pd.D
         raise ValueError("min_errors must be a positive integer")
     frame = validated_forecasts(forecasts)
     converted = []
-    for _, group in frame.groupby(["run_id", "fold_id", "model"], dropna=False, sort=False):
+    for _, group in frame.groupby(["asset", "model"], sort=False):
         ordered = group.sort_values("target_date")
         exp_errors = np.exp(ordered["actual"] - ordered["predicted"]).to_numpy(dtype="float64")
         observable = np.searchsorted(

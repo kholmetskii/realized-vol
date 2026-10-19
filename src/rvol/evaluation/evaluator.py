@@ -7,12 +7,12 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-from rvol.backtesting.results import CASE_COLUMNS, validated_forecasts
 from rvol.evaluation.comparison import DieboldMarianoTest
 from rvol.evaluation.contracts import ForecastComparisonTest, ForecastMetric
 from rvol.evaluation.metrics import MSEMetric
+from rvol.walkforward.results import CASE_COLUMNS, validated_forecasts
 
-META_COLUMNS = ("run_id", "fold_id")
+META_COLUMNS = ("asset",)
 COMPARISON_COLUMNS = (
     "metric",
     "baseline_model",
@@ -44,10 +44,10 @@ class EvaluationResult:
 
 
 def validated_evaluation_sample(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """Require one run/fold and a common sample for jointly evaluated models."""
+    """Require one asset and a common sample for jointly evaluated models."""
     frame = validated_forecasts(forecasts)
     if len(frame[list(META_COLUMNS)].drop_duplicates()) != 1:
-        raise ValueError("evaluate each run/fold separately")
+        raise ValueError("evaluate each asset separately")
     aligned_columns = ["origin_date", "target_date", "actual"]
     groups = [group[aligned_columns].reset_index(drop=True) for _, group in frame.groupby("model")]
     if any(not group.equals(groups[0]) for group in groups[1:]):

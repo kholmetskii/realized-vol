@@ -146,7 +146,7 @@ def test_invalid_metric_and_comparison_choices_are_rejected(options):
         "nonfinite_actual",
         "nonfinite_prediction",
         "empty_model",
-        "mixed_run",
+        "mixed_asset",
         "invalid_interval",
         "partial_fit_dates",
         "future_fit",
@@ -169,9 +169,9 @@ def test_invalid_or_misaligned_forecast_tables_are_rejected(corruption):
         frame.loc[0, "predicted"] = np.inf
     elif corruption == "empty_model":
         frame.loc[0, "model"] = ""
-    elif corruption == "mixed_run":
-        frame["run_id"] = "one"
-        frame.loc[0, "run_id"] = "two"
+    elif corruption == "mixed_asset":
+        frame["asset"] = "one"
+        frame.loc[0, "asset"] = "two"
     elif corruption == "invalid_interval":
         frame.loc[0, "origin_date"] = frame.loc[0, "target_date"]
     elif corruption == "partial_fit_dates":
@@ -186,8 +186,8 @@ def test_invalid_or_misaligned_forecast_tables_are_rejected(corruption):
 
 
 @pytest.mark.parametrize("consumer", ["evaluate", "validate_evaluation"])
-@pytest.mark.parametrize("problem", ["unaligned", "mixed_run", "mixed_fold"])
-def test_evaluation_consumers_enforce_one_run_and_a_common_sample(consumer, problem):
+@pytest.mark.parametrize("problem", ["unaligned", "mixed_asset"])
+def test_evaluation_consumers_enforce_one_asset_and_a_common_sample(consumer, problem):
     frame = sample_forecasts()
     evaluation = evaluate(frame)
     if problem == "unaligned":
@@ -195,10 +195,9 @@ def test_evaluation_consumers_enforce_one_run_and_a_common_sample(consumer, prob
         frame.loc[selected, ["origin_date", "target_date"]] += pd.Timedelta(days=30)
         message = "identical dates and actual values"
     else:
-        column = "run_id" if problem == "mixed_run" else "fold_id"
-        frame[column] = "first"
-        frame.loc[0, column] = "second"
-        message = "each run/fold separately"
+        frame["asset"] = "EURUSD"
+        frame.loc[0, "asset"] = "GBPUSD"
+        message = "each asset separately"
 
     with pytest.raises(ValueError, match=message):
         if consumer == "evaluate":

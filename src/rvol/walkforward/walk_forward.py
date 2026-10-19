@@ -7,10 +7,10 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-from rvol.backtesting._data import validate_run, validated_data
-from rvol.backtesting.planning import WalkForwardPlan, WalkForwardPlanner
-from rvol.backtesting.results import forecast_frame
 from rvol.models.contracts import ForecastModel, Predictor, UpdatablePredictor
+from rvol.walkforward._data import validate_run, validated_data
+from rvol.walkforward.planning import WalkForwardPlan, WalkForwardPlanner
+from rvol.walkforward.results import forecast_frame
 
 
 class WalkForwardRunner:
@@ -43,8 +43,7 @@ class WalkForwardRunner:
         *,
         model: ForecastModel,
         feature_columns: Sequence[str] = (),
-        run_id: str = "default",
-        fold_id: str | None = None,
+        asset: str = "default",
     ) -> pd.DataFrame:
         """Forecast a ready table using the explicitly ordered feature columns.
 
@@ -52,7 +51,7 @@ class WalkForwardRunner:
         Feature engineering, target construction and transformations happen before
         this call. Every model receives only numerical arrays in the supplied order.
         """
-        validate_run(model, feature_columns, run_id, fold_id)
+        validate_run(model, feature_columns, asset)
         frame = validated_data(data, feature_columns)
         origins = pd.DatetimeIndex(frame["origin_date"])
         targets = pd.DatetimeIndex(frame["target_date"])
@@ -100,8 +99,7 @@ class WalkForwardRunner:
                     "target_date": targets[position],
                     "actual": float(frame["target"].iloc[position]),
                     "predicted": float(prediction[0]),
-                    "run_id": run_id,
-                    "fold_id": fold_id,
+                    "asset": asset,
                     **fit_details,
                 }
             )

@@ -7,7 +7,7 @@ from rvol.evaluation.comparison import (
 from rvol.evaluation.contracts import ComparisonOutcome
 from rvol.evaluation.evaluator import EvaluationResult, evaluate
 from rvol.evaluation.metrics import MAEMetric, MSEMetric
-from rvol.evaluation.robustness import analyze_robustness, cumulative_loss_advantage
+from rvol.evaluation.robustness import analyze_robustness
 
 __all__ = [
     "ComparisonOutcome",
@@ -16,7 +16,6 @@ __all__ = [
     "MAEMetric",
     "MSEMetric",
     "analyze_robustness",
-    "cumulative_loss_advantage",
     "diebold_mariano",
     "evaluate",
 ]

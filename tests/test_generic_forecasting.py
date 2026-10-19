@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
 from rvol.evaluation import MAEMetric, MSEMetric, evaluate
 from rvol.models import (
@@ -13,6 +12,7 @@ from rvol.models import (
     LinearRegressionModel,
     NaiveModel,
 )
+from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 from tests.forecasting_helpers import lag_features
 
 

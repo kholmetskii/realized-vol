@@ -8,10 +8,10 @@ import pandas as pd
 import pytest
 
 from rvol import experiment
-from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
 from rvol.data.volatility.features import VarianceFeatureBuilder
 from rvol.evaluation import evaluate
+from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 from tests.forecasting_helpers import benchmark_models, daily_sample, prepared_variance
 
 
@@ -42,7 +42,7 @@ def test_forecasting_and_experiment_imports_do_not_load_matplotlib():
 import sys
 import pandas as pd
 from rvol.data.preparation import prepare_forecast_data
-from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
+from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 from rvol.data.preparation import build_next_observation_targets
 from rvol.models import AR1Model
 from rvol.evaluation import evaluate
@@ -63,9 +63,9 @@ assert 'matplotlib' not in sys.modules
 def test_importing_models_and_runner_loads_no_preparation_or_evaluation():
     code = """
 import sys
-from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
+from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 from rvol.models import AR1Model
-for prefix in ('rvol.data', 'rvol.evaluation', 'rvol.experiment', 'rvol.simulation',
+for prefix in ('rvol.data', 'rvol.evaluation', 'rvol.experiment',
                'matplotlib', 'scipy'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 """
@@ -114,7 +114,7 @@ def test_compare_scores_log_and_smeared_variance_forecasts_on_the_same_dates(win
     if custom_model:
         models = (*models[1:], (CustomMean(), ()))
     forecasts = experiment.forecast(
-        experiment.prepare(daily_series()), models, runner_for(window), run_id="test"
+        experiment.prepare(daily_series()), models, runner_for(window), asset="test"
     )
 
     comparison = experiment.compare(forecasts, evaluation_start=EVALUATION_START)

@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
 from rvol.data.volatility.features import VarianceFeatureBuilder
 from rvol.models import AR1Model
+from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 from tests.forecasting_helpers import daily_sample
 
 

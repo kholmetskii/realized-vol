@@ -3,7 +3,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from rvol.backtesting import WalkForwardPlanner
+from rvol.walkforward import WalkForwardPlanner
 
 
 @pytest.mark.parametrize(

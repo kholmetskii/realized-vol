@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
-from rvol.backtesting.planning import WalkForwardPlan, WalkForwardStep
 from rvol.models import AR1Model, EWMAModel, LinearRegressionModel
+from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
+from rvol.walkforward.planning import WalkForwardPlan, WalkForwardStep
 from tests.forecasting_helpers import benchmark_models, prepared_variance, reference_predictions
 
 
@@ -68,8 +68,8 @@ def test_reporting_bounds_preserve_the_full_history_refit_anchor(window):
         )
 
 
-@pytest.mark.parametrize("changes", [{"run_id": ""}, {"fold_id": " "}])
-def test_invalid_run_labels_are_rejected_without_fitting(changes):
+@pytest.mark.parametrize("changes", [{"asset": ""}, {"asset": " "}])
+def test_invalid_asset_labels_are_rejected_without_fitting(changes):
     class NoFit(LinearRegressionModel):
         def fit(self, *args):
             raise AssertionError("invalid options must be rejected before fitting")
@@ -149,18 +149,18 @@ def test_target_columns_cannot_be_used_as_model_inputs():
         )
 
 
-def test_reused_runner_keeps_run_and_fold_labels_specific_to_each_call():
+def test_reused_runner_keeps_asset_labels_specific_to_each_call():
     runner = WalkForwardRunner(WalkForwardPlanner(min_train_size=15, refit_every=5))
     data = prepared_variance(feature_columns=())
-    first = runner.run(data, model=EWMAModel(), run_id="first", fold_id="fold-1")
-    second = runner.run(data, model=EWMAModel(), run_id="second", fold_id="fold-2")
+    first = runner.run(data, model=EWMAModel(), asset="EURUSD")
+    second = runner.run(data, model=EWMAModel(), asset="GBPUSD")
     default = runner.run(data, model=EWMAModel())
 
     np.testing.assert_array_equal(first.predicted, second.predicted)
     np.testing.assert_array_equal(first.predicted, default.predicted)
-    assert set(first.run_id) == {"first"} and set(first.fold_id) == {"fold-1"}
-    assert set(second.run_id) == {"second"} and set(second.fold_id) == {"fold-2"}
-    assert set(default.run_id) == {"default"} and default.fold_id.isna().all()
+    assert set(first.asset) == {"EURUSD"}
+    assert set(second.asset) == {"GBPUSD"}
+    assert set(default.asset) == {"default"}
 
 
 def test_edited_planner_settings_are_applied_and_validated_before_execution():

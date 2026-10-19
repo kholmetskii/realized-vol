@@ -1,17 +1,57 @@
-# Realized volatility forecasting: EUR/USD
+# Realized-volatility forecasting models
 
-How well can tomorrow's EUR/USD volatility be forecast from intraday data? This
-project measures daily realized variance from tick quotes and compares five
-forecasting models out of sample, walk-forward, with no look-ahead.
+A library for comparing volatility forecasting models across assets. It builds
+daily realized variance (RV) from tick quotes, forecasts it walk-forward with
+competing models, and compares them with QLIKE, log-RV MSE and Diebold–Mariano
+tests.
 
-**Result:** the HAR model has the lowest loss under both metrics. It beats every
-benchmark by 16–53% in QLIKE, and each difference is significant at the 1%
-level (one-sided Diebold–Mariano test).
+**Status:** the full pipeline works for one asset (EUR/USD, below). Running the
+same comparison over several assets is the next step.
 
-## Results
+## Pipeline
 
-453 out-of-sample sessions, 2 January 2025 – 30 September 2026. Lower loss is
-better.
+```python
+from datetime import date
+from pathlib import Path
+
+from rvol import experiment
+from rvol.data.parquet import ParquetDatasetRepository
+from rvol.data.volatility.coverage import audit_daily_dataset
+from rvol.data.volatility.dataset import build_daily_dataset
+from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
+
+# 1. ticks -> one RV per FX session (17:00 New York close), from 5-minute returns
+daily = build_daily_dataset(sorted(Path("data/ticks/EURUSD").glob("EURUSD_*.parquet")))
+assert audit_daily_dataset(daily).passed
+ParquetDatasetRepository("data/derived/EURUSD_daily_rv_5min.parquet").save(daily)
+
+# 2. walk-forward forecasts of next-session log RV, every model refitted each session
+runner = WalkForwardRunner(
+    WalkForwardPlanner(
+        min_train_size=252,
+        forecast_start=date(2024, 10, 1),  # Oct–Dec 2024 only calibrates smearing
+        forecast_end=date(2026, 9, 30),
+    )
+)
+forecasts = experiment.forecast(
+    experiment.prepare(daily), experiment.benchmark_models(), runner, asset="EURUSD"
+)
+
+# 3. QLIKE on smeared variance forecasts, MSE on log forecasts, DM tests vs HAR
+comparison = experiment.compare(forecasts, evaluation_start=date(2025, 1, 1))
+experiment.results_table(comparison)
+```
+
+Tick quotes are downloaded beforehand, one quarter per call:
+
+```sh
+python -m rvol.data.sources.dukascopy EURUSD 2023-01-01 2023-03-31
+```
+
+## Example: EUR/USD
+
+453 out-of-sample sessions, 2 January 2025 – 30 September 2026, produced by the
+code above. Lower loss is better.
 
 | model | QLIKE | HAR lower by | DM p-value | log-RV MSE | DM p-value | HAR wins (QLIKE) |
 |---|---|---|---|---|---|---|
@@ -21,94 +61,51 @@ better.
 | naive (today = tomorrow) | 0.192 | 20.6% | 2×10⁻⁴ | 0.359 | 6×10⁻⁶ | 51% of days |
 | historical mean | 0.326 | 53.2% | 2×10⁻¹¹ | 0.541 | 1×10⁻⁷ | 76% of days |
 
-![Forecasts, mean QLIKE and cumulative QLIKE advantage of HAR](figures/eurusd_forecasts.png)
+HAR is best under both metrics and beats every benchmark at the 1% level. Its
+advantage over the naive forecast comes from avoiding large misses: it wins only
+half of the sessions but has a 21% lower mean QLIKE.
 
-- **QLIKE is the headline metric.** RV is only a noisy estimate of the true
-  variance. QLIKE still ranks forecasts correctly under that noise, while MSE
-  on logarithms does not (Patton, 2011). Both metrics put HAR first and the
-  historical mean last; AR(1) and EWMA swap places.
-- **HAR wins by avoiding large misses, not by winning every day.** Against the
-  naive forecast it wins only 51% of sessions but has a 21% lower mean QLIKE.
-  The advantage accumulates across the whole sample rather than coming from a
-  few days (lower-right panel above).
-- **The conclusion does not depend on the HAC lag.** With 0–5 Newey–West lags,
-  every QLIKE p-value stays below 0.001 and every log-MSE p-value below 0.01.
+## Models and evaluation
 
-## Method
+All models forecast next-session log RV:
 
-1. **Data.** Dukascopy EUR/USD tick quotes; price = bid/ask mid. A trading day
-   is an FX session ending at 17:00 New York time; sessions shorter than 12
-   hours (holidays, the Sunday open) are dropped. 973 sessions, January 2023 –
-   October 2026.
-2. **Realized variance.** The sum of squared 5-minute log returns within each
-   session, using the last quote in each 5-minute bin. The signature plot in
-   [EUR/USD research](docs/eurusd-research.md) shows why 5 minutes: finer
-   sampling is inflated by bid–ask noise.
-3. **Models**, all forecasting next-session log RV:
-   - historical mean;
-   - naive (today's value);
-   - EWMA (decay 0.94);
-   - AR(1) on today's log RV;
-   - HAR (Corsi, 2009): regression on today's log RV and its 5- and 22-session
-     means.
-4. **Walk-forward.** Every model is refitted each session on an expanding
-   window (at least 252 sessions), using only outcomes observed by that
-   session's close.
-5. **Back to variance.** exp(log forecast) is the median of RV, not its mean,
-   so it forecasts too low. Each forecast is multiplied by a Duan smearing
-   factor: the mean of exp(error) over that model's earlier errors observable at
-   the forecast date. Forecasts from October–December 2024 only provide those
-   errors.
-6. **Evaluation.** QLIKE on variance forecasts and MSE on log forecasts. A
-   one-sided Diebold–Mariano test of whether HAR has lower expected loss than
-   each benchmark, with a Newey–West variance (5 lags).
+- **historical mean** of past log RV;
+- **naive**: tomorrow equals today;
+- **EWMA** of past log RV (decay 0.94);
+- **AR(1)** on today's log RV;
+- **HAR** (Corsi, 2009): regression on today's log RV and its 5- and
+  22-session means.
 
-## Limitations
+Evaluation:
 
-- **One instrument, one period.** The result supports HAR on EUR/USD over
-  2025–2026, not universally.
-- **Nested models.** AR(1) is HAR without the weekly and monthly terms. For
-  nested models the DM test is approximate and conservative (Clark & West,
-  2007); at these p-values the conclusion is unaffected.
-- **Fitting and scoring losses differ.** Models are fitted by least squares on
-  logarithms but scored by QLIKE on variance. Smearing removes the resulting
-  downward bias, but no model is fitted to minimise QLIKE.
-- **Inspected period.** The period was not fixed in advance of all analysis.
-  The archived Q1 2024 study in [EUR/USD research](docs/eurusd-research.md)
-  froze its design before evaluation and also found HAR best under both
-  metrics.
+- **QLIKE is the headline metric.** RV is a noisy estimate of the true variance.
+  QLIKE still ranks forecasts correctly under that noise, while MSE on
+  logarithms does not (Patton, 2011).
+- **Back to variance.** exp(log forecast) is the median of RV, not its mean, so
+  it forecasts too low. Each variance forecast is multiplied by a Duan smearing
+  factor estimated from the model's earlier errors observable at the forecast
+  date.
+- **Tests.** One-sided Diebold–Mariano tests of each benchmark against the
+  candidate, with a Newey–West variance. Robustness tables cover HAC lag
+  choice, win rates, monthly losses and the largest errors.
 
-## Reproduce
+Limitations:
 
-```sh
-pip install -e ".[dev,notebooks]"
+- AR(1) is nested in HAR, so its DM test is approximate and conservative
+  (Clark & West, 2007).
+- Models are fitted by least squares on logarithms but scored by QLIKE on
+  variance.
+- Sessions follow the FX convention (17:00 New York close), which suits
+  currencies and metals but not exchange-traded assets with trading hours.
 
-# download tick quotes, one quarter per call (repeat for 2023-Q1 … 2026-Q3)
-python -m rvol.data.sources.dukascopy EURUSD 2023-01-01 2023-03-31
-```
-
-Then run the notebooks in order, top to bottom:
-
-| notebook | what it does |
-|---|---|
-| [`01_data`](notebooks/01_data.ipynb) | builds and audits the daily RV dataset; signature plot and noise test |
-| [`02_simulation`](notebooks/02_simulation.ipynb) | checks the RV estimator on Heston paths with known integrated variance |
-| [`03_forecasting`](notebooks/03_forecasting.ipynb) | walk-forward forecasts, evaluation, robustness; the results above |
-
-The notebooks call the library for every calculation and own all
-visualisation: each figure is drawn in its notebook and saved in `figures/`,
-including the one above. Calculations live in `src/rvol` and are covered by
-tests. Model list, dates and smearing settings are set at the top of
-`03_forecasting`.
+## Data layout
 
 Data files live under `data/`, one folder per stage (not in git):
 
-- `raw/dukascopy/EURUSD/`: downloaded hourly tick files, a cache that is never edited;
-- `ticks/EURUSD/`: decoded bid/ask quotes, one Parquet file per quarter;
-- `derived/`: the daily RV dataset that forecasting reads.
-
-Dataset details and the archived Q1 2024 study are in
-[EUR/USD research](docs/eurusd-research.md).
+- `raw/dukascopy/<SYMBOL>/`: downloaded hourly tick files, a cache that is never
+  edited;
+- `ticks/<SYMBOL>/`: decoded bid/ask quotes, one Parquet file per quarter;
+- `derived/`: daily RV datasets.
 
 ## Project layout
 
@@ -120,22 +117,18 @@ src/rvol/
 │   ├── volatility/          daily RV dataset, coverage audit, log-RV features
 │   ├── preparation.py       target construction and feature/target alignment
 │   └── parquet.py           atomic Parquet storage
-├── estimators/              realized variance, per-session RV, sampling-frequency diagnostics
+├── estimators/              realized variance on price arrays and per session
 ├── models/                  historical mean, naive, EWMA, AR(1), HAR, OLS
-├── backtesting/             walk-forward planning and execution
+├── walkforward/             walk-forward planning and execution
 ├── evaluation/              losses, DM test, robustness, variance conversion
-├── experiment.py            the study: prepare, forecast, compare, results table
-└── simulation/              Heston paths, observation noise, Monte Carlo validation
-notebooks/                   01_data, 02_simulation, 03_forecasting
+└── experiment.py            prepare, forecast, compare, results table
 tests/
 ```
 
-Dependencies point one way: `models` ← `backtesting` ← `evaluation` ←
+Dependencies point one way: `models` ← `walkforward` ← `evaluation` ←
 `experiment`. Data acquisition and preparation are independent of the
-forecasting packages; the daily dataset builds on `estimators`, and
-`simulation` depends on nothing else in the package. Notebooks connect the
-pieces and draw every figure. `tests/test_architecture.py` enforces these
-directions.
+forecasting packages, and the daily dataset builds on `estimators`.
+`tests/test_architecture.py` enforces these directions.
 
 - **Models** receive numerical arrays only; they never choose columns, build
   targets or transform units. A configured model fits arrays and returns a
@@ -143,9 +136,6 @@ directions.
 - **Walk-forward is split in two.** `WalkForwardPlanner` decides when to refit
   and which rows are observable. `WalkForwardRunner` executes that plan.
 - **Evaluation** consumes forecast tables; it never sees models or market data.
-- **The library draws nothing.** It returns numbers and tables (including the
-  running RV, running IV and cumulative loss advantage behind each figure);
-  matplotlib is only needed for the notebooks.
 
 ## Using the library
 
@@ -164,9 +154,9 @@ Origins and targets must be unique, every origin must precede its target, and
 inputs must use only information available at the origin.
 
 ```python
-from rvol.backtesting import WalkForwardPlanner, WalkForwardRunner
 from rvol.evaluation import MSEMetric, evaluate
 from rvol.models import HARModel
+from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 
 runner = WalkForwardRunner(
     WalkForwardPlanner(window="expanding", min_train_size=252, refit_every=1)
@@ -188,12 +178,12 @@ Planner settings:
 - Only labels with `target_date <= origin_date` enter training.
 
 `runner.plan(prepared).execution` returns the settings and the actual refit
-anchor, so a notebook can record exactly how forecasts were produced.
+anchor, so you can record exactly how forecasts were produced.
 
 Forecast tables have these columns: model, origin_date, target_date, actual,
-predicted, n_train, fit_date, train_start_date, train_end_date, run_id and
-fold_id. `evaluate` requires one run and identical dates and actual values
-across the models it compares.
+predicted, n_train, fit_date, train_start_date, train_end_date and asset.
+`evaluate` requires one asset and identical dates and actual values across the
+models it compares.
 
 ### Adding a model
 
@@ -223,6 +213,6 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 pytest -m "not slow"
-ruff check src tests notebooks
+ruff check src tests
 mypy src tests
 ```

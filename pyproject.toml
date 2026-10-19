@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "rvol"
 version = "0.1.0"
-description = "Realized volatility: estimation and forecast evaluation"
+description = "Compare realized-volatility forecasting models across assets"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -22,10 +22,6 @@ dev = [
     "pytest-cov>=4.1",
     "ruff>=0.6",
     "mypy>=1.10",
-]
-notebooks = [
-    "jupyterlab>=4.0",
-    "matplotlib>=3.8",
 ]
 
 [tool.hatch.build.targets.wheel]

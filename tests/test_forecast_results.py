@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from rvol.backtesting.results import validated_forecasts
+from rvol.walkforward.results import validated_forecasts
 
 
 @pytest.fixture
@@ -31,24 +31,19 @@ def test_forecast_records_allow_models_with_different_samples(forecast_table, di
     validated = validated_forecasts(forecast_table)
 
     pd.testing.assert_frame_equal(validated[original.columns], original)
-    assert validated.run_id.tolist() == ["default"] * 4
-    assert validated.fold_id.isna().all()
+    assert validated.asset.tolist() == ["default"] * 4
     pd.testing.assert_frame_equal(forecast_table, original)
 
 
-@pytest.mark.parametrize("identity", ["run_id", "fold_id"])
-def test_overlapping_dates_are_unique_within_each_run_fold(forecast_table, identity):
-    first = forecast_table.assign(run_id="first", fold_id=None)
-    if identity == "fold_id":
-        first["fold_id"] = "first_fold"
-    second = first.copy()
-    second[identity] = "second"
+def test_overlapping_dates_are_unique_within_each_asset(forecast_table):
+    first = forecast_table.assign(asset="EURUSD")
+    second = first.assign(asset="GBPUSD")
     combined = pd.concat([first, second], ignore_index=True)
 
     validated = validated_forecasts(combined)
 
     assert len(validated) == 8
-    assert len(validated[["run_id", "fold_id"]].drop_duplicates()) == 2
+    assert validated["asset"].nunique() == 2
     duplicate = pd.concat([combined, first.iloc[:1]], ignore_index=True)
-    with pytest.raises(ValueError, match="within a run/fold"):
+    with pytest.raises(ValueError, match="within an asset"):
         validated_forecasts(duplicate)

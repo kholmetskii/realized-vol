@@ -69,7 +69,7 @@ def analyze_robustness(
         raise ValueError("hac_lags must be non-empty unique non-negative integers")
     losses = evaluation.losses
     result = {}
-    metadata = frame[["run_id", "fold_id"]].iloc[0].to_dict()
+    metadata = frame[["asset"]].iloc[0].to_dict()
     for name in selected:
         if name == "monthly_losses":
             table = (
@@ -143,24 +143,3 @@ def analyze_robustness(
             table[key] = value
         result[name] = table
     return result
-
-
-def cumulative_loss_advantage(
-    evaluation: EvaluationResult, *, metric: str, candidate: str
-) -> pd.DataFrame:
-    """Running sum of each baseline's loss minus the candidate's, by target date.
-
-    One column per baseline model, in name order. A rising line means the
-    candidate keeps forecasting better than that baseline.
-    """
-    losses = (
-        evaluation.losses.loc[evaluation.losses["metric"] == metric]
-        .pivot(index="target_date", columns="model", values="loss")
-        .sort_index()
-    )
-    if losses.empty:
-        raise ValueError(f"evaluation has no {metric} losses")
-    if candidate not in losses.columns:
-        raise ValueError(f"evaluation has no losses for candidate {candidate!r}")
-    baselines = [model for model in sorted(losses.columns) if model != candidate]
-    return losses[baselines].sub(losses[candidate], axis=0).cumsum()
