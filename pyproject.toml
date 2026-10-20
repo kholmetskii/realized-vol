@@ -23,6 +23,11 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
 ]
+notebooks = [
+    "jinja2>=3.1",  # pandas DataFrame.style
+    "jupyterlab>=4.0",
+    "matplotlib>=3.8",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rvol"]
