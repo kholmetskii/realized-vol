@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from rvol.models.contracts import FloatArray
+from rvol.models.arrays import FloatArray
 
 
 def validate_decay(decay: float) -> None:

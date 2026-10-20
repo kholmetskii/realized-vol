@@ -37,7 +37,7 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "NPY"]
+select = ["E", "F", "I", "UP", "B", "SIM", "NPY", "N"]
 
 [tool.mypy]
 files = ["src", "tests"]

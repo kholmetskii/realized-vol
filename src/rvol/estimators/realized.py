@@ -5,8 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from rvol.data.market.sampling import SamplingOrigin, last_tick_sample
-from rvol.data.market.sessions import session_labels
+from rvol.data.market import SamplingOrigin, last_tick_sample, session_labels
 from rvol.estimators.variance import realized_variance as array_realized_variance
 
 

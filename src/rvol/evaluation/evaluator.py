@@ -7,10 +7,12 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-from rvol.evaluation.comparison import DieboldMarianoTest
-from rvol.evaluation.contracts import ForecastComparisonTest, ForecastMetric
-from rvol.evaluation.metrics import MSEMetric
-from rvol.walkforward.results import CASE_COLUMNS, validated_forecasts
+from rvol.evaluation.diebold_mariano_test import DieboldMarianoTest
+from rvol.evaluation.evaluation_result import EvaluationResult
+from rvol.evaluation.forecast_comparison_test import ForecastComparisonTest
+from rvol.evaluation.forecast_metric import ForecastMetric
+from rvol.evaluation.mse_metric import MSEMetric
+from rvol.walkforward import CASE_COLUMNS, validated_forecasts
 
 META_COLUMNS = ("asset",)
 COMPARISON_COLUMNS = (
@@ -27,20 +29,6 @@ COMPARISON_COLUMNS = (
     "test_parameters",
     *META_COLUMNS,
 )
-
-
-class EvaluationResult:
-    """Three ordinary tables: individual losses, means and requested comparisons."""
-
-    def __init__(
-        self,
-        losses: pd.DataFrame,
-        summaries: pd.DataFrame,
-        comparisons: pd.DataFrame,
-    ) -> None:
-        self.losses = losses
-        self.summaries = summaries
-        self.comparisons = comparisons
 
 
 def validated_evaluation_sample(forecasts: pd.DataFrame) -> pd.DataFrame:
@@ -60,8 +48,13 @@ def evaluate(
     *,
     metrics: Sequence[ForecastMetric] | None = None,
     comparison_pairs: Sequence[tuple[str, str]] = (),
-    comparison_test: ForecastComparisonTest | None = None,
+    comparison_tests: Sequence[ForecastComparisonTest] | None = None,
 ) -> EvaluationResult:
+    """Score every model with every metric and run every test on every pair.
+
+    Pairs are (baseline, candidate). Without ``comparison_tests`` the one-sided
+    Diebold-Mariano test is used.
+    """
     frame = validated_evaluation_sample(forecasts)
     selected = (MSEMetric(),) if metrics is None else tuple(metrics)
     names = [metric.name for metric in selected]
@@ -74,7 +67,14 @@ def evaluate(
     ):
         raise ValueError("comparison pairs must be unique distinct selected models")
     metadata = {name: frame[name].iloc[0] for name in META_COLUMNS}
-    test = comparison_test if comparison_test is not None else DieboldMarianoTest()
+    tests = (DieboldMarianoTest(),) if comparison_tests is None else tuple(comparison_tests)
+    test_names = [test.name for test in tests]
+    if (
+        not test_names
+        or len(set(test_names)) != len(test_names)
+        or any(not name.strip() for name in test_names)
+    ):
+        raise ValueError("comparison tests must have non-empty unique names")
     losses, comparisons = [], []
     by_key: dict[tuple[str, str], np.ndarray] = {}
     for metric in selected:
@@ -94,23 +94,24 @@ def evaluate(
         for baseline, candidate in pairs:
             base = by_key[(metric.name, baseline)]
             proposed = by_key[(metric.name, candidate)]
-            outcome = test.compare(base.copy(), proposed.copy())
-            comparisons.append(
-                {
-                    "metric": metric.name,
-                    "baseline_model": baseline,
-                    "candidate_model": candidate,
-                    "n_obs": len(base),
-                    "baseline_mean_loss": float(np.mean(base)),
-                    "candidate_mean_loss": float(np.mean(proposed)),
-                    "mean_loss_difference": float(np.mean(base - proposed)),
-                    "test_name": test.name,
-                    "statistic": outcome.statistic,
-                    "p_value": outcome.p_value,
-                    "test_parameters": dict(outcome.parameters),
-                    **metadata,
-                }
-            )
+            for test in tests:
+                outcome = test.compare(base.copy(), proposed.copy())
+                comparisons.append(
+                    {
+                        "metric": metric.name,
+                        "baseline_model": baseline,
+                        "candidate_model": candidate,
+                        "n_obs": len(base),
+                        "baseline_mean_loss": float(np.mean(base)),
+                        "candidate_mean_loss": float(np.mean(proposed)),
+                        "mean_loss_difference": float(np.mean(base - proposed)),
+                        "test_name": test.name,
+                        "statistic": outcome.statistic,
+                        "p_value": outcome.p_value,
+                        "test_parameters": dict(outcome.parameters),
+                        **metadata,
+                    }
+                )
     loss_table = pd.concat(losses, ignore_index=True)
     return EvaluationResult(
         loss_table,

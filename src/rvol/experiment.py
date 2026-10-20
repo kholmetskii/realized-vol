@@ -21,11 +21,23 @@ from datetime import date
 import pandas as pd
 
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
-from rvol.data.volatility.features import VarianceFeatureBuilder
-from rvol.evaluation import EvaluationResult, analyze_robustness, evaluate
+from rvol.data.volatility import VarianceFeatureBuilder
+from rvol.evaluation import (
+    EvaluationResult,
+    ForecastComparisonTest,
+    ForecastMetric,
+    evaluate,
+)
+from rvol.evaluation.robustness import Diagnostic, analyze_robustness, standard_diagnostics
 from rvol.evaluation.volatility import LogMSEMetric, QLikeMetric, variance_forecasts
-from rvol.models import AR1Model, EWMAModel, HARModel, HistoricalMeanModel, NaiveModel
-from rvol.models.contracts import ForecastModel
+from rvol.models import (
+    AR1Model,
+    EWMAModel,
+    ForecastModel,
+    HARModel,
+    HistoricalMeanModel,
+    NaiveModel,
+)
 from rvol.walkforward import WalkForwardRunner
 
 HAR_FEATURES = ("log_rv_daily", "log_rv_weekly", "log_rv_monthly")
@@ -96,13 +108,26 @@ def compare(
     evaluation_start: date,
     candidate: str = "HAR",
     smearing_min_errors: int = 20,
+    log_metrics: Sequence[ForecastMetric] | None = None,
+    variance_metrics: Sequence[ForecastMetric] | None = None,
+    comparison_tests: Sequence[ForecastComparisonTest] | None = None,
+    diagnostics: Sequence[Diagnostic] | None = None,
 ) -> Comparison:
-    """Score log forecasts with log-RV MSE and smeared variance forecasts with QLIKE.
+    """Score log forecasts and their smeared variance counterparts on the same dates.
 
     Forecasts before ``evaluation_start`` only supply errors for the smearing
-    factor. Both scales are then scored on the same target dates, and every
-    other model is tested against ``candidate`` with a one-sided DM test.
+    factor. Every other model is tested against ``candidate``. Defaults: log-RV
+    MSE on the log scale, QLIKE on the variance scale, the one-sided DM test and
+    the standard diagnostics for ``candidate``.
     """
+    log_selected = (LogMSEMetric(),) if log_metrics is None else tuple(log_metrics)
+    variance_selected = (QLikeMetric(),) if variance_metrics is None else tuple(variance_metrics)
+    shared = {m.name for m in log_selected}.intersection(m.name for m in variance_selected)
+    if shared:
+        raise ValueError(f"metric names must differ between scales: {', '.join(sorted(shared))}")
+    selected_diagnostics = (
+        standard_diagnostics(candidate) if diagnostics is None else tuple(diagnostics)
+    )
     models = sorted(log_forecasts["model"].unique())
     if candidate not in models:
         raise ValueError(f"candidate {candidate!r} has no forecasts")
@@ -110,7 +135,7 @@ def compare(
     start = pd.Timestamp(evaluation_start)
     smeared = variance_forecasts(log_forecasts, min_errors=smearing_min_errors)
 
-    def score(forecasts: pd.DataFrame, metric: LogMSEMetric | QLikeMetric) -> ScaleResult:
+    def score(forecasts: pd.DataFrame, metrics: tuple[ForecastMetric, ...]) -> ScaleResult:
         window = (
             forecasts.loc[forecasts["target_date"] >= start]
             .sort_values(["model", "target_date"])
@@ -118,35 +143,47 @@ def compare(
         )
         if window.empty:
             raise ValueError("no forecasts on or after evaluation_start")
-        evaluation = evaluate(window, metrics=(metric,), comparison_pairs=pairs)
-        robustness = analyze_robustness(window, evaluation, candidate_model=candidate)
+        evaluation = evaluate(
+            window, metrics=metrics, comparison_pairs=pairs, comparison_tests=comparison_tests
+        )
+        robustness = analyze_robustness(window, evaluation, selected_diagnostics)
         return ScaleResult(window, evaluation, robustness)
 
     return Comparison(
         candidate=candidate,
-        log_rv=score(log_forecasts, LogMSEMetric()),
-        variance=score(smeared, QLikeMetric()),
+        log_rv=score(log_forecasts, log_selected),
+        variance=score(smeared, variance_selected),
     )
 
 
 def results_table(comparison: Comparison) -> pd.DataFrame:
-    """One row per model: mean losses, the candidate's advantage, DM p-values, win rate."""
-    rows = []
-    for scale, label in ((comparison.variance, "QLIKE"), (comparison.log_rv, "log-RV MSE")):
-        means = scale.evaluation.summaries.set_index("model")["mean_loss"]
-        tests = scale.evaluation.comparisons.set_index("baseline_model")["p_value"]
-        advantage = 1 - means[comparison.candidate] / means
-        rows.append(
-            pd.DataFrame(
-                {
-                    label: means,
-                    f"{label}: {comparison.candidate} lower by": advantage,
-                    f"{label}: DM p-value": tests,
-                }
-            )
-        )
-    wins = comparison.variance.robustness["win_rates"].set_index("baseline_model")
-    table = pd.concat(rows, axis=1)
-    table[f"{comparison.candidate} wins (QLIKE)"] = wins["candidate_win_rate"]
+    """One row per model: mean losses, the candidate's advantage, test p-values, win rate.
+
+    Columns repeat for every metric (variance scale first) and every test; win
+    rates come from the variance scale when that diagnostic was run. Rows are
+    sorted by the first variance-scale metric.
+    """
+    candidate = comparison.candidate
+    columns: dict[str, pd.Series] = {}
+    for scale in (comparison.variance, comparison.log_rv):
+        summaries = scale.evaluation.summaries
+        tests = scale.evaluation.comparisons
+        for metric in summaries["metric"].unique():
+            means = summaries.loc[summaries["metric"] == metric].set_index("model")["mean_loss"]
+            columns[metric] = means
+            columns[f"{metric}: {candidate} lower by"] = 1 - means[candidate] / means
+            tested = tests.loc[tests["metric"] == metric]
+            for test_name in tested["test_name"].unique():
+                p_values = tested.loc[tested["test_name"] == test_name]
+                columns[f"{metric}: {test_name} p-value"] = p_values.set_index("baseline_model")[
+                    "p_value"
+                ]
+    table = pd.DataFrame(columns)
+    wins = comparison.variance.robustness.get("win_rates")
+    if wins is not None:
+        for metric, group in wins.groupby("metric", sort=False):
+            table[f"{candidate} wins ({metric})"] = group.set_index("baseline_model")[
+                "candidate_win_rate"
+            ]
     table.index.name = "model"
-    return table.sort_values("QLIKE")
+    return table.sort_values(comparison.variance.evaluation.summaries["metric"].iloc[0])

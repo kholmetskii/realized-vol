@@ -15,9 +15,8 @@ from datetime import date
 from pathlib import Path
 
 from rvol import experiment
-from rvol.data.parquet import ParquetDatasetRepository
-from rvol.data.volatility.coverage import audit_daily_dataset
-from rvol.data.volatility.dataset import build_daily_dataset
+from rvol.data.storage import ParquetDatasetRepository
+from rvol.data.volatility import audit_daily_dataset, build_daily_dataset
 from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 
 # 1. ticks -> one RV per FX session (17:00 New York close), from 5-minute returns
@@ -112,23 +111,38 @@ Data files live under `data/`, one folder per stage (not in git):
 ```text
 src/rvol/
 ├── data/                    acquire, persist and prepare observations
-│   ├── sources/dukascopy.py tick download, decoding and cache
+│   ├── sources/dukascopy/   tick download client, raw-hour cache, decoding, CLI
 │   ├── market/              FX sessions and timestamp sampling
 │   ├── volatility/          daily RV dataset, coverage audit, log-RV features
-│   ├── preparation.py       target construction and feature/target alignment
-│   └── parquet.py           atomic Parquet storage
+│   ├── preparation/         target construction and feature/target alignment
+│   └── storage/             atomic Parquet storage
 ├── estimators/              realized variance on price arrays and per session
 ├── models/                  historical mean, naive, EWMA, AR(1), HAR, OLS
 ├── walkforward/             walk-forward planning and execution
-├── evaluation/              losses, DM test, robustness, variance conversion
+├── evaluation/              losses, metrics, pairwise tests (DM)
+│   ├── robustness/          diagnostics: HAC lags, win rates, monthly losses, errors
+│   └── volatility/          QLIKE, log-RV MSE and variance conversion
 └── experiment.py            prepare, forecast, compare, results table
-tests/
+tests/                       mirrors src/rvol/, plus integration/
 ```
 
 Dependencies point one way: `models` ← `walkforward` ← `evaluation` ←
 `experiment`. Data acquisition and preparation are independent of the
 forecasting packages, and the daily dataset builds on `estimators`.
-`tests/test_architecture.py` enforces these directions.
+`tests/integration/test_architecture.py` enforces these directions.
+
+Code follows Java-style layout rules:
+
+- one public class per module, named after the class in snake_case
+  (`HARModel` → `har_model.py`); free functions live next to the class they
+  serve, or in a module named after their topic (`smearing.py`);
+- each package re-exports its public API in `__init__.py`, and other packages
+  import only from there (`from rvol.models import HARModel`); `data` and
+  `data.sources` only group subpackages;
+- classes name the interface they implement (`class HARModel(ForecastModel)`),
+  like Java's `implements`;
+- modules starting with `_` are internal to their package;
+- tests mirror the source tree: `models/har_model.py` → `tests/models/test_har_model.py`.
 
 - **Models** receive numerical arrays only; they never choose columns, build
   targets or transform units. A configured model fits arrays and returns a
@@ -205,6 +219,35 @@ class MedianModel:
 
 A predictor may also implement `update(X, y)`, returning new state after newly
 observable outcomes between refits; EWMA uses this.
+
+### Adding a metric, test or diagnostic
+
+Evaluation is extended the same way, by a class with a name and one method:
+
+| kind | method | used by |
+|---|---|---|
+| metric | `losses(actual, predicted)` → one non-negative loss per forecast | `evaluate(metrics=...)` |
+| pairwise test | `compare(baseline_loss, candidate_loss)` → `ComparisonOutcome` | `evaluate(comparison_tests=...)` |
+| diagnostic | `run(forecasts, evaluation)` → `DataFrame` | `analyze_robustness(diagnostics=...)` |
+
+`experiment.compare` passes the same choices through (`log_metrics`,
+`variance_metrics`, `comparison_tests`, `diagnostics`); its defaults are
+log-RV MSE, QLIKE, the DM test and `standard_diagnostics(candidate)`.
+
+```python
+from rvol.evaluation import DieboldMarianoTest, MAEMetric, evaluate
+from rvol.evaluation.robustness import HacSensitivity, WinRates, analyze_robustness
+
+evaluation = evaluate(
+    forecasts,
+    metrics=(MAEMetric(),),
+    comparison_pairs=[("EWMA", "HAR")],
+    comparison_tests=(DieboldMarianoTest(), MyOtherTest()),
+)
+tables = analyze_robustness(
+    forecasts, evaluation, (WinRates("HAR"), HacSensitivity("HAR", lags=range(10)))
+)
+```
 
 ## Install and check
 

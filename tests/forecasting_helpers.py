@@ -8,15 +8,16 @@ import numpy as np
 import pandas as pd
 
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
-from rvol.data.volatility.features import VarianceFeatureBuilder
+from rvol.data.volatility import VarianceFeatureBuilder
 from rvol.models import (
     AR1Model,
     EWMAModel,
+    ForecastModel,
     HARModel,
     HistoricalMeanModel,
     NaiveModel,
+    UpdatablePredictor,
 )
-from rvol.models.contracts import ForecastModel, UpdatablePredictor
 
 
 def daily_sample(n: int = 85) -> pd.DataFrame:
