@@ -1,4 +1,4 @@
-"""Score forecast tables directly, without experiment objects or specifications."""
+"""Score forecast tables: losses per metric, mean losses and pairwise tests."""
 
 from __future__ import annotations
 
@@ -11,10 +11,8 @@ from rvol.evaluation.diebold_mariano_test import DieboldMarianoTest
 from rvol.evaluation.evaluation_result import EvaluationResult
 from rvol.evaluation.forecast_comparison_test import ForecastComparisonTest
 from rvol.evaluation.forecast_metric import ForecastMetric
-from rvol.evaluation.mse_metric import MSEMetric
 from rvol.walkforward import CASE_COLUMNS, validated_forecasts
 
-META_COLUMNS = ("asset",)
 COMPARISON_COLUMNS = (
     "metric",
     "baseline_model",
@@ -27,15 +25,15 @@ COMPARISON_COLUMNS = (
     "statistic",
     "p_value",
     "test_parameters",
-    *META_COLUMNS,
+    "series",
 )
 
 
-def validated_evaluation_sample(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """Require one asset and a common sample for jointly evaluated models."""
+def _validated_sample(forecasts: pd.DataFrame) -> pd.DataFrame:
+    """Require one series and a common sample for jointly evaluated models."""
     frame = validated_forecasts(forecasts)
-    if len(frame[list(META_COLUMNS)].drop_duplicates()) != 1:
-        raise ValueError("evaluate each asset separately")
+    if frame["series"].nunique() != 1:
+        raise ValueError("evaluate each series separately")
     aligned_columns = ["origin_date", "target_date", "actual"]
     groups = [group[aligned_columns].reset_index(drop=True) for _, group in frame.groupby("model")]
     if any(not group.equals(groups[0]) for group in groups[1:]):
@@ -46,7 +44,7 @@ def validated_evaluation_sample(forecasts: pd.DataFrame) -> pd.DataFrame:
 def evaluate(
     forecasts: pd.DataFrame,
     *,
-    metrics: Sequence[ForecastMetric] | None = None,
+    metrics: Sequence[ForecastMetric],
     comparison_pairs: Sequence[tuple[str, str]] = (),
     comparison_tests: Sequence[ForecastComparisonTest] | None = None,
 ) -> EvaluationResult:
@@ -55,8 +53,8 @@ def evaluate(
     Pairs are (baseline, candidate). Without ``comparison_tests`` the one-sided
     Diebold-Mariano test is used.
     """
-    frame = validated_evaluation_sample(forecasts)
-    selected = (MSEMetric(),) if metrics is None else tuple(metrics)
+    frame = _validated_sample(forecasts)
+    selected = tuple(metrics)
     names = [metric.name for metric in selected]
     if not names or len(set(names)) != len(names) or any(not name.strip() for name in names):
         raise ValueError("metrics must have non-empty unique names")
@@ -66,7 +64,7 @@ def evaluate(
         base == candidate or {base, candidate}.difference(models) for base, candidate in pairs
     ):
         raise ValueError("comparison pairs must be unique distinct selected models")
-    metadata = {name: frame[name].iloc[0] for name in META_COLUMNS}
+    series = frame["series"].iloc[0]
     tests = (DieboldMarianoTest(),) if comparison_tests is None else tuple(comparison_tests)
     test_names = [test.name for test in tests]
     if (
@@ -109,7 +107,7 @@ def evaluate(
                         "statistic": outcome.statistic,
                         "p_value": outcome.p_value,
                         "test_parameters": dict(outcome.parameters),
-                        **metadata,
+                        "series": series,
                     }
                 )
     loss_table = pd.concat(losses, ignore_index=True)
@@ -132,29 +130,7 @@ def _summarize_losses(losses: pd.DataFrame) -> pd.DataFrame:
                 "metric": metric,
                 "n_obs": len(group),
                 "mean_loss": mean,
-                **{name: group[name].iloc[0] for name in META_COLUMNS},
+                "series": group["series"].iloc[0],
             }
         )
     return pd.DataFrame(rows)
-
-
-def validate_evaluation(forecasts: pd.DataFrame, evaluation: EvaluationResult) -> pd.DataFrame:
-    """Check that an evaluation was computed from exactly these forecasts.
-
-    Reports call this so a stale evaluation cannot be saved or plotted next to
-    different forecasts. Losses, summaries and comparisons are not recomputed:
-    evaluate() is tested on its own.
-    """
-    frame = validated_evaluation_sample(forecasts)
-    columns = [*CASE_COLUMNS, "actual", "predicted"]
-    losses = evaluation.losses
-    if losses.empty or not {"metric", "loss", *columns}.issubset(losses.columns):
-        raise ValueError("evaluation must contain one loss per forecast and metric")
-    expected = frame[columns].reset_index(drop=True)
-    for _, group in losses.groupby("metric", sort=False):
-        recorded = group.sort_values(["model", "target_date"])[columns].reset_index(drop=True)
-        try:
-            pd.testing.assert_frame_equal(recorded, expected, check_dtype=False, check_exact=True)
-        except AssertionError as error:
-            raise ValueError("evaluation does not match the supplied forecasts") from error
-    return frame

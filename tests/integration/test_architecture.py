@@ -1,5 +1,6 @@
 import ast
 import pathlib
+import re
 
 import pytest
 
@@ -11,8 +12,6 @@ PACKAGE_DEPENDENCIES = {
     "models": {"models"},
     "walkforward": {"walkforward", "models"},
     "evaluation": {"evaluation", "walkforward", "models"},
-    "evaluation.volatility": {"evaluation.volatility", "evaluation", "walkforward", "models"},
-    "evaluation.robustness": {"evaluation.robustness", "evaluation", "walkforward", "models"},
     "data": set(),
     "data.preparation": {"data.preparation"},
     "data.sources": set(),
@@ -20,16 +19,13 @@ PACKAGE_DEPENDENCIES = {
     "data.storage": {"data.storage"},
     "data.market": {"data.market"},
     "data.volatility": {"data.volatility", "data.market", "estimators"},
-    "estimators": {"estimators", "estimators.variance", "data.market"},
+    "estimators": {"estimators", "estimators.variance"},
     "estimators.variance": set(),
     "experiment": {
         "experiment",
         "walkforward",
         "data.preparation",
-        "data.volatility",
         "evaluation",
-        "evaluation.volatility",
-        "evaluation.robustness",
         "models",
     },
 }
@@ -103,3 +99,24 @@ def test_models_have_no_required_specification_or_domain_layer():
                 isinstance(node, ast.FunctionDef) and node.name == "specification"
                 for node in ast.walk(tree)
             ), str(path)
+
+
+# Packages that score, fit and prepare any series must not know what is forecast.
+GENERIC_PACKAGES = ("models", "walkforward", "evaluation", "data.preparation", "data.storage")
+DOMAIN_WORDS = re.compile(
+    r"\b(?:volatil\w*|variance|realized|realised|rv|log_rv\w*|sessions?|fx|ticks?|assets?"
+    r"|dukascopy|trading|eurusd|bid|ask|quotes?|prices?)\b",
+    re.IGNORECASE,
+)
+
+
+@pytest.mark.parametrize("package", GENERIC_PACKAGES)
+def test_generic_packages_do_not_know_the_forecasting_domain(package: str):
+    root = PACKAGE_ROOT.joinpath(*package.split("."))
+    found = [
+        f"{path.relative_to(PACKAGE_ROOT).as_posix()}:{number}: {match.group()}"
+        for path in sorted(root.rglob("*.py"))
+        for number, line in enumerate(path.read_text().splitlines(), start=1)
+        for match in DOMAIN_WORDS.finditer(line)
+    ]
+    assert not found, "domain vocabulary in a generic package: " + "; ".join(found)

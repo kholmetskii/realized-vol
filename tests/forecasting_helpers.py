@@ -7,8 +7,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
-from rvol.data.volatility import VarianceFeatureBuilder
+from rvol.data.preparation import (
+    TrailingMeanFeatures,
+    build_next_observation_targets,
+    prepare_forecast_data,
+)
 from rvol.models import (
     AR1Model,
     EWMAModel,
@@ -26,14 +29,22 @@ def daily_sample(n: int = 85) -> pd.DataFrame:
     return pd.DataFrame({"date": pd.bdate_range("2023-01-02", periods=n), "log_rv": values})
 
 
-ALL_FEATURES = ("log_rv_daily", "log_rv_weekly", "log_rv_monthly")
+WINDOWS = {"log_rv_daily": 1, "log_rv_weekly": 5, "log_rv_monthly": 22}
+ALL_FEATURES = tuple(WINDOWS)
+
+
+def har_features(names: tuple[str, ...] = ALL_FEATURES) -> TrailingMeanFeatures:
+    """The selected HAR inputs of the log_rv column, as in rvol.experiment."""
+    return TrailingMeanFeatures(
+        {name: WINDOWS[name] for name in names}, value_col="log_rv", max_gap_days=7
+    )
 
 
 def benchmark_models() -> tuple[tuple[ForecastModel, tuple[str, ...]], ...]:
     return (
         (HistoricalMeanModel(), ()),
         (NaiveModel(), ("log_rv_daily",)),
-        (EWMAModel(), ()),
+        (EWMAModel(decay=0.94), ()),
         (AR1Model(), ("log_rv_daily",)),
         (HARModel(), ALL_FEATURES),
     )
@@ -46,7 +57,7 @@ def prepared_variance(
 ) -> pd.DataFrame:
     daily = daily_sample(n)
     return prepare_forecast_data(
-        VarianceFeatureBuilder(feature_names=feature_columns)(daily),
+        har_features(feature_columns)(daily),
         build_next_observation_targets(daily, value_col="log_rv"),
     )
 

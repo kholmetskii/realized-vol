@@ -2,8 +2,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
-from rvol.data.volatility import VarianceFeatureBuilder
+from rvol.data.preparation import (
+    TrailingMeanFeatures,
+    build_next_observation_targets,
+    prepare_forecast_data,
+)
 from rvol.models import HistoricalMeanModel
 from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 
@@ -11,6 +14,11 @@ from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 def daily_sample(n: int = 16) -> pd.DataFrame:
     dates = pd.bdate_range("2024-01-02", periods=n + 1).delete(min(6, n))
     return pd.DataFrame({"date": dates, "log_rv": np.log(np.arange(1, n + 1))})
+
+
+def short_windows() -> TrailingMeanFeatures:
+    windows = {"log_rv_daily": 1, "log_rv_weekly": 2, "log_rv_monthly": 4}
+    return TrailingMeanFeatures(windows, value_col="log_rv")
 
 
 def test_targets_label_the_full_timeline_without_feature_warmup():
@@ -34,7 +42,7 @@ def test_targets_label_the_full_timeline_without_feature_warmup():
 
 def test_sparse_reordered_features_keep_targets_on_the_full_session_timeline():
     daily = daily_sample()
-    features = VarianceFeatureBuilder(weekly_window=2, monthly_window=4)(daily)
+    features = short_windows()(daily)
     # Interior omissions must not move labels to the next retained feature row.
     features = features.iloc[[0, 2, 5, 7, 12]].iloc[::-1]
     targets = build_next_observation_targets(daily, value_col="log_rv").iloc[::-1]
@@ -99,7 +107,7 @@ def test_independent_plain_builders_need_no_specification_or_shared_base_class()
 )
 def test_preparation_rejects_ambiguous_alignment_and_invalid_targets(corruption, message):
     daily = daily_sample()
-    features = VarianceFeatureBuilder(weekly_window=2, monthly_window=4)(daily)
+    features = short_windows()(daily)
     targets = build_next_observation_targets(daily, value_col="log_rv")
     if corruption == "feature_labels":
         features["target"] = 0.0
@@ -137,11 +145,10 @@ def test_empty_prepared_data_keeps_the_same_columns(cause):
     daily = daily_sample(1 if cause == "no_future" else 3)
     if cause == "no_data":
         daily = daily.iloc[:0]
-    features = VarianceFeatureBuilder(
-        feature_names=("log_rv_daily",)
-        if cause == "no_future"
-        else ("log_rv_daily", "log_rv_weekly", "log_rv_monthly"),
-    )(daily)
+    windows = {"log_rv_daily": 1}
+    if cause != "no_future":
+        windows |= {"log_rv_weekly": 5, "log_rv_monthly": 22}
+    features = TrailingMeanFeatures(windows, value_col="log_rv")(daily)
     targets = build_next_observation_targets(daily, value_col="log_rv")
     result = prepare_forecast_data(features, targets)
     assert result.empty
@@ -150,7 +157,7 @@ def test_empty_prepared_data_keeps_the_same_columns(cause):
 
 def test_preparation_requires_the_target_timeline_before_feature_warmup():
     daily = daily_sample()
-    features = VarianceFeatureBuilder(weekly_window=2, monthly_window=4)(daily)
+    features = short_windows()(daily)
     targets = build_next_observation_targets(daily, value_col="log_rv").drop(index=1)
     with pytest.raises(ValueError, match="next observation"):
         prepare_forecast_data(features, targets)

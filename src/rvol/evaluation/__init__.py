@@ -1,17 +1,17 @@
 """Evaluate forecasts and compare models: losses, metrics and pairwise tests.
 
-Robustness diagnostics live in rvol.evaluation.robustness and volatility-specific
-metrics in rvol.evaluation.volatility.
+The package scores whatever forecasts it receives and knows nothing about what
+they forecast.
 """
 
 from rvol.evaluation.comparison_outcome import ComparisonOutcome
 from rvol.evaluation.diebold_mariano_test import DieboldMarianoTest, diebold_mariano
+from rvol.evaluation.evaluate import evaluate
 from rvol.evaluation.evaluation_result import EvaluationResult
-from rvol.evaluation.evaluator import evaluate, validate_evaluation
 from rvol.evaluation.forecast_comparison_test import ForecastComparisonTest
 from rvol.evaluation.forecast_metric import ForecastMetric
-from rvol.evaluation.mae_metric import MAEMetric, absolute_error
-from rvol.evaluation.mse_metric import MSEMetric, squared_error
+from rvol.evaluation.qlike_metric import QLikeMetric
+from rvol.evaluation.robustness import hac_sensitivity, win_rates
 
 __all__ = [
     "ComparisonOutcome",
@@ -19,11 +19,9 @@ __all__ = [
     "EvaluationResult",
     "ForecastComparisonTest",
     "ForecastMetric",
-    "MAEMetric",
-    "MSEMetric",
-    "absolute_error",
+    "QLikeMetric",
     "diebold_mariano",
     "evaluate",
-    "squared_error",
-    "validate_evaluation",
+    "hac_sensitivity",
+    "win_rates",
 ]

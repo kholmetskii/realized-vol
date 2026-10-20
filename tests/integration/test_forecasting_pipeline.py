@@ -9,10 +9,15 @@ import pytest
 
 from rvol import experiment
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
-from rvol.data.volatility import VarianceFeatureBuilder
 from rvol.evaluation import evaluate
 from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
-from tests.forecasting_helpers import benchmark_models, daily_sample, prepared_variance
+from tests.forecasting_helpers import (
+    benchmark_models,
+    daily_sample,
+    har_features,
+    prepared_variance,
+)
+from tests.metrics import MSEMetric
 
 
 def test_changing_future_data_cannot_change_earlier_predictions():
@@ -25,7 +30,7 @@ def test_changing_future_data_cannot_change_earlier_predictions():
 
         def prepare(frame, selected=columns):
             return prepare_forecast_data(
-                VarianceFeatureBuilder(feature_names=selected)(frame),
+                har_features(selected)(frame),
                 build_next_observation_targets(frame, value_col="log_rv"),
             )
 
@@ -53,7 +58,11 @@ prepared = prepare_forecast_data(features, build_next_observation_targets(data))
 forecasts = WalkForwardRunner(WalkForwardPlanner(min_train_size=5)).run(
     prepared, model=AR1Model(), feature_columns=("lag_0",)
 )
-evaluate(forecasts)
+class Squared:
+    name = 'squared'
+    def losses(self, actual, predicted):
+        return (actual - predicted) ** 2
+evaluate(forecasts, metrics=(Squared(),))
 assert 'matplotlib' not in sys.modules
 """
     completed = subprocess.run([sys.executable, "-c", code], text=True, capture_output=True)
@@ -101,7 +110,7 @@ EVALUATION_START = date(2025, 1, 1)
 @pytest.mark.parametrize(
     "window, custom_model", [("expanding", False), ("rolling", False), ("expanding", True)]
 )
-def test_compare_scores_log_and_smeared_variance_forecasts_on_the_same_dates(window, custom_model):
+def test_compare_scores_smeared_variance_forecasts_on_the_same_dates(window, custom_model):
     from rvol.models import ConstantPredictor
 
     class CustomMean:
@@ -120,25 +129,19 @@ def test_compare_scores_log_and_smeared_variance_forecasts_on_the_same_dates(win
     comparison = experiment.compare(forecasts, evaluation_start=EVALUATION_START)
 
     names = {model.name for model, _ in models}
-    scales = ((comparison.log_rv, "log-RV MSE"), (comparison.variance, "QLIKE"))
-    for scale, metric in scales:
-        assert set(scale.evaluation.summaries.model) == names
-        assert set(scale.evaluation.summaries.metric) == {metric}
-        assert set(scale.evaluation.comparisons.candidate_model) == {"HAR"}
-        assert scale.forecasts.target_date.min() >= pd.Timestamp(EVALUATION_START)
-        assert {"win_rates", "hac_sensitivity", "monthly_losses"} <= set(scale.robustness)
-    pd.testing.assert_frame_equal(
-        comparison.log_rv.forecasts[["model", "target_date"]],
-        comparison.variance.forecasts[["model", "target_date"]],
-    )
-    variance = comparison.variance.forecasts
+    assert set(comparison.evaluation.summaries.model) == names
+    assert set(comparison.evaluation.summaries.metric) == {"QLIKE"}
+    assert set(comparison.evaluation.comparisons.candidate_model) == {"HAR"}
+    variance = comparison.forecasts
+    assert variance.target_date.min() >= pd.Timestamp(EVALUATION_START)
+    assert variance.groupby("model").target_date.apply(tuple).nunique() == 1
     assert (variance.smearing_factor > 0).all()
     assert (variance.actual > 0).all() and (variance.predicted > 0).all()
     if window == "rolling":
         assert set(variance.n_train) == {252}
 
 
-def test_results_table_summarises_both_evaluations():
+def test_results_table_summarises_the_evaluation():
     forecasts = experiment.forecast(
         experiment.prepare(daily_series()), experiment.benchmark_models(), runner_for()
     )
@@ -146,12 +149,12 @@ def test_results_table_summarises_both_evaluations():
 
     table = experiment.results_table(comparison)
 
-    qlike = comparison.variance.evaluation.summaries.set_index("model").mean_loss
+    qlike = comparison.evaluation.summaries.set_index("model").mean_loss
     pd.testing.assert_series_equal(table["QLIKE"], qlike.loc[table.index], check_names=False)
     assert table["QLIKE"].is_monotonic_increasing
     assert table.loc["HAR", "QLIKE: HAR lower by"] == 0
-    tests = comparison.log_rv.evaluation.comparisons.set_index("baseline_model").p_value
-    np.testing.assert_allclose(table.loc[tests.index, "log-RV MSE: DM p-value"], tests)
+    tests = comparison.evaluation.comparisons.set_index("baseline_model").p_value
+    np.testing.assert_allclose(table.loc[tests.index, "QLIKE: DM p-value"], tests)
     assert pd.isna(table.loc["HAR", "HAR wins (QLIKE)"])
 
 
@@ -180,16 +183,15 @@ def test_separate_models_share_an_explicit_comparison_sample():
         ],
         ignore_index=True,
     )
-    evaluation = evaluate(forecasts, comparison_pairs=(("naive", "HAR"),))
+    evaluation = evaluate(forecasts, metrics=(MSEMetric(),), comparison_pairs=(("naive", "HAR"),))
     assert len(evaluation.summaries) == 5
     assert forecasts.groupby("model").target_date.apply(list).map(tuple).nunique() == 1
     assert len(evaluation.comparisons) == 1
 
 
-def test_compare_accepts_other_metrics_tests_and_diagnostics():
-    from rvol.evaluation import ComparisonOutcome, DieboldMarianoTest, MAEMetric
-    from rvol.evaluation.robustness import MonthlyLosses, WinRates
-    from rvol.evaluation.volatility import QLikeMetric
+def test_compare_accepts_other_metrics_and_tests():
+    from rvol.evaluation import ComparisonOutcome, DieboldMarianoTest, QLikeMetric
+    from tests.metrics import MAEMetric
 
     class SignTest:
         name = "sign"
@@ -204,27 +206,10 @@ def test_compare_accepts_other_metrics_tests_and_diagnostics():
     comparison = experiment.compare(
         forecasts,
         evaluation_start=EVALUATION_START,
-        variance_metrics=(QLikeMetric(), MAEMetric()),
+        metrics=(QLikeMetric(), MAEMetric()),
         comparison_tests=(DieboldMarianoTest(), SignTest()),
-        diagnostics=(WinRates("HAR"), MonthlyLosses()),
     )
 
-    assert set(comparison.variance.evaluation.summaries.metric) == {"QLIKE", "MAE"}
-    assert set(comparison.variance.robustness) == {"win_rates", "monthly_losses"}
+    assert set(comparison.evaluation.summaries.metric) == {"QLIKE", "MAE"}
     table = experiment.results_table(comparison)
     assert {"MAE: DM p-value", "QLIKE: sign p-value", "HAR wins (MAE)"} <= set(table.columns)
-
-
-def test_compare_rejects_the_same_metric_name_on_both_scales():
-    from rvol.evaluation import MSEMetric
-
-    forecasts = experiment.forecast(
-        experiment.prepare(daily_series()), experiment.benchmark_models(), runner_for()
-    )
-    with pytest.raises(ValueError, match="differ between scales"):
-        experiment.compare(
-            forecasts,
-            evaluation_start=EVALUATION_START,
-            log_metrics=(MSEMetric(),),
-            variance_metrics=(MSEMetric(),),
-        )

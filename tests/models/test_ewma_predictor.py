@@ -52,7 +52,7 @@ def test_single_and_batch_updates_match_fitting_the_complete_observation_history
 
 
 def test_an_empty_update_preserves_the_fitted_state():
-    fitted = EWMAModel().fit(np.empty((1, 0)), np.array([-10.0]))
+    fitted = EWMAModel(decay=0.94).fit(np.empty((1, 0)), np.array([-10.0]))
 
     assert fitted.update(np.empty((0, 0)), np.empty(0)) is fitted
 
@@ -69,7 +69,7 @@ def test_an_empty_update_preserves_the_fitted_state():
     ],
 )
 def test_updates_validate_alignment_shapes_and_finite_targets(features, target, message):
-    fitted = EWMAModel().fit(np.empty((1, 0)), np.array([-10.0]))
+    fitted = EWMAModel(decay=0.94).fit(np.empty((1, 0)), np.array([-10.0]))
 
     with pytest.raises(ValueError, match=message):
         fitted.update(features, target)

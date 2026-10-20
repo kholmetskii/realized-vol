@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.evaluation import evaluate
-from rvol.evaluation.volatility import QLikeMetric, qlike, variance_forecasts
+from rvol.evaluation import QLikeMetric, evaluate
+from rvol.walkforward import smeared_forecasts
 
 
 def log_forecasts(actual, predicted, *, model: str = "HAR") -> pd.DataFrame:
@@ -25,7 +25,7 @@ def test_factor_averages_only_errors_observable_at_each_origin():
     actual = rng.normal(-10, 0.5, 30)
     predicted = actual - rng.normal(0, 0.5, 30)
 
-    result = variance_forecasts(log_forecasts(actual, predicted), min_errors=1)
+    result = smeared_forecasts(log_forecasts(actual, predicted), min_errors=1)
 
     exp_errors = np.exp(actual - predicted)
     expected = [exp_errors[:i].mean() for i in range(1, 30)]
@@ -40,8 +40,8 @@ def test_changing_a_later_outcome_leaves_earlier_factors_unchanged():
     changed = actual.copy()
     changed[-1] += 3.0
 
-    original = variance_forecasts(log_forecasts(actual, predicted), min_errors=5)
-    shifted = variance_forecasts(log_forecasts(changed, predicted), min_errors=5)
+    original = smeared_forecasts(log_forecasts(actual, predicted), min_errors=5)
+    shifted = smeared_forecasts(log_forecasts(changed, predicted), min_errors=5)
 
     pd.testing.assert_series_equal(original["smearing_factor"], shifted["smearing_factor"])
 
@@ -50,7 +50,7 @@ def test_constant_error_is_removed_exactly():
     actual = np.linspace(-11, -9, 12)
     predicted = actual - 0.3
 
-    result = variance_forecasts(log_forecasts(actual, predicted), min_errors=3)
+    result = smeared_forecasts(log_forecasts(actual, predicted), min_errors=3)
 
     assert np.allclose(result["smearing_factor"], np.exp(0.3))
     assert np.allclose(result["predicted"], result["actual"])
@@ -59,7 +59,7 @@ def test_constant_error_is_removed_exactly():
 def test_rows_without_enough_observable_errors_are_dropped():
     actual = np.zeros(10)
 
-    result = variance_forecasts(log_forecasts(actual, actual), min_errors=4)
+    result = smeared_forecasts(log_forecasts(actual, actual), min_errors=4)
 
     assert len(result) == 6
     assert result["target_date"].min() == log_forecasts(actual, actual)["target_date"].iloc[4]
@@ -75,7 +75,7 @@ def test_each_model_uses_its_own_errors():
         ignore_index=True,
     )
 
-    result = variance_forecasts(frame, min_errors=2)
+    result = smeared_forecasts(frame, min_errors=2)
 
     factors = result.groupby("model")["smearing_factor"].unique()
     assert np.allclose(factors["low"], np.exp(0.2))
@@ -89,7 +89,7 @@ def test_smearing_recovers_the_mean_of_lognormal_variance():
     actual = mean_log + rng.normal(0, sigma, n)
     predicted = np.full(n, mean_log)
 
-    result = variance_forecasts(log_forecasts(actual, predicted), min_errors=1_000)
+    result = smeared_forecasts(log_forecasts(actual, predicted), min_errors=1_000)
 
     true_mean = np.exp(mean_log + sigma**2 / 2)
     assert np.exp(mean_log) / true_mean == pytest.approx(np.exp(-(sigma**2) / 2))
@@ -102,11 +102,13 @@ def test_smearing_lowers_qlike_for_unbiased_log_forecasts():
     actual = -10 + rng.normal(0, 0.5, 400)
     frame = log_forecasts(actual, np.full(400, -10.0))
 
-    smeared = variance_forecasts(frame, min_errors=50)
+    smeared = smeared_forecasts(frame, min_errors=50)
     naive = smeared["predicted"] / smeared["smearing_factor"]
 
-    assert qlike(smeared["actual"], smeared["predicted"]).mean() < (
-        qlike(smeared["actual"], naive).mean()
+    actual = smeared["actual"].to_numpy()
+    qlike = QLikeMetric()
+    assert qlike.losses(actual, smeared["predicted"].to_numpy()).mean() < (
+        qlike.losses(actual, naive.to_numpy()).mean()
     )
 
 
@@ -120,10 +122,11 @@ def test_output_can_be_evaluated_with_variance_scale_qlike():
         ignore_index=True,
     )
 
-    smeared = variance_forecasts(frame, min_errors=5)
+    smeared = smeared_forecasts(frame, min_errors=5)
     evaluation = evaluate(smeared, metrics=(QLikeMetric(),), comparison_pairs=[("A", "B")])
 
-    expected = qlike(smeared["actual"], smeared["predicted"])
+    actual_values = smeared["actual"].to_numpy()
+    expected = QLikeMetric().losses(actual_values, smeared["predicted"].to_numpy())
     assert np.allclose(evaluation.losses.sort_values(["model", "target_date"])["loss"], expected)
 
 
@@ -131,10 +134,10 @@ def test_output_can_be_evaluated_with_variance_scale_qlike():
 def test_min_errors_must_be_a_positive_integer(min_errors):
     actual = np.zeros(5)
     with pytest.raises(ValueError, match="min_errors"):
-        variance_forecasts(log_forecasts(actual, actual), min_errors=min_errors)
+        smeared_forecasts(log_forecasts(actual, actual), min_errors=min_errors)
 
 
 def test_too_short_history_is_rejected():
     actual = np.zeros(5)
     with pytest.raises(ValueError, match="enough observable errors"):
-        variance_forecasts(log_forecasts(actual, actual), min_errors=10)
+        smeared_forecasts(log_forecasts(actual, actual), min_errors=10)

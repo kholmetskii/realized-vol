@@ -17,8 +17,8 @@ from rvol.walkforward.walk_forward_planner import WalkForwardPlanner
 class WalkForwardRunner:
     """Execute a planner's steps with fresh fitted state on every call."""
 
-    def __init__(self, planner: WalkForwardPlanner | None = None) -> None:
-        self._planner = WalkForwardPlanner() if planner is None else planner
+    def __init__(self, planner: WalkForwardPlanner) -> None:
+        self._planner = planner
 
     @property
     def planner(self) -> WalkForwardPlanner:
@@ -44,7 +44,7 @@ class WalkForwardRunner:
         *,
         model: ForecastModel,
         feature_columns: Sequence[str] = (),
-        asset: str = "default",
+        series: str = "default",
     ) -> pd.DataFrame:
         """Forecast a ready table using the explicitly ordered feature columns.
 
@@ -52,7 +52,7 @@ class WalkForwardRunner:
         Feature engineering, target construction and transformations happen before
         this call. Every model receives only numerical arrays in the supplied order.
         """
-        validate_run(model, feature_columns, asset)
+        validate_run(model, feature_columns, series)
         frame = validated_data(data, feature_columns)
         origins = pd.DatetimeIndex(frame["origin_date"])
         targets = pd.DatetimeIndex(frame["target_date"])
@@ -100,7 +100,7 @@ class WalkForwardRunner:
                     "target_date": targets[position],
                     "actual": float(frame["target"].iloc[position]),
                     "predicted": float(prediction[0]),
-                    "asset": asset,
+                    "series": series,
                     **fit_details,
                 }
             )

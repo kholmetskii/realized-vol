@@ -67,8 +67,8 @@ def test_reporting_bounds_preserve_the_full_history_refit_anchor(window):
         )
 
 
-@pytest.mark.parametrize("changes", [{"asset": ""}, {"asset": " "}])
-def test_invalid_asset_labels_are_rejected_without_fitting(changes):
+@pytest.mark.parametrize("changes", [{"series": ""}, {"series": " "}])
+def test_invalid_series_labels_are_rejected_without_fitting(changes):
     class NoFit(LinearRegressionModel):
         def fit(self, *args):
             raise AssertionError("invalid options must be rejected before fitting")
@@ -100,7 +100,7 @@ def test_rolling_window_can_grow_from_minimum_to_capacity():
 def test_state_updates_do_not_change_recorded_fit_dates_and_training_boundaries():
     data = prepared_variance(feature_columns=())
     result = WalkForwardRunner(WalkForwardPlanner(min_train_size=10, refit_every=5)).run(
-        data, model=EWMAModel()
+        data, model=EWMAModel(decay=0.94)
     )
     first = result.iloc[:5]
     assert (
@@ -148,18 +148,18 @@ def test_target_columns_cannot_be_used_as_model_inputs():
         )
 
 
-def test_reused_runner_keeps_asset_labels_specific_to_each_call():
+def test_reused_runner_keeps_series_labels_specific_to_each_call():
     runner = WalkForwardRunner(WalkForwardPlanner(min_train_size=15, refit_every=5))
     data = prepared_variance(feature_columns=())
-    first = runner.run(data, model=EWMAModel(), asset="EURUSD")
-    second = runner.run(data, model=EWMAModel(), asset="GBPUSD")
-    default = runner.run(data, model=EWMAModel())
+    first = runner.run(data, model=EWMAModel(decay=0.94), series="EURUSD")
+    second = runner.run(data, model=EWMAModel(decay=0.94), series="GBPUSD")
+    default = runner.run(data, model=EWMAModel(decay=0.94))
 
     np.testing.assert_array_equal(first.predicted, second.predicted)
     np.testing.assert_array_equal(first.predicted, default.predicted)
-    assert set(first.asset) == {"EURUSD"}
-    assert set(second.asset) == {"GBPUSD"}
-    assert set(default.asset) == {"default"}
+    assert set(first.series) == {"EURUSD"}
+    assert set(second.series) == {"GBPUSD"}
+    assert set(default.series) == {"default"}
 
 
 def test_edited_planner_settings_are_applied_and_validated_before_execution():
@@ -211,7 +211,7 @@ def test_runner_executes_the_supplied_plan_including_warmup_and_observation_upda
             "target": [2.0, 4.0, 8.0, 16.0, 32.0],
         }
     )
-    runner = WalkForwardRunner(FixedPlanner())
+    runner = WalkForwardRunner(FixedPlanner(min_train_size=1))
 
     forecasts = runner.run(ready, model=EWMAModel(decay=0.5))
 

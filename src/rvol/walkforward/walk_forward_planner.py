@@ -22,9 +22,9 @@ class WalkForwardPlanner:
     def __init__(
         self,
         *,
+        min_train_size: int,
         window: Literal["expanding", "rolling"] = "expanding",
         window_size: int | None = None,
-        min_train_size: int = 252,
         refit_every: int = 1,
         forecast_start: date | None = None,
         forecast_end: date | None = None,

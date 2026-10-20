@@ -18,13 +18,13 @@ FORECAST_COLUMNS = (
     "fit_date",
     "train_start_date",
     "train_end_date",
-    "asset",
+    "series",
 )
 CASE_COLUMNS = (
     "model",
     "origin_date",
     "target_date",
-    "asset",
+    "series",
 )
 
 
@@ -42,7 +42,7 @@ def forecast_frame(rows: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
 
 
 def validated_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """Copy and validate forecast records, allowing several assets and samples."""
+    """Copy and validate forecast records, allowing several series and samples."""
     required = {"model", "origin_date", "target_date", "actual", "predicted"}
     missing = required.difference(forecasts.columns)
     if not forecasts.columns.is_unique or missing:
@@ -50,13 +50,13 @@ def validated_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
     if forecasts.empty:
         raise ValueError("forecasts must not be empty")
     frame = forecasts.copy()
-    if "asset" not in frame:
-        frame["asset"] = "default"
+    if "series" not in frame:
+        frame["series"] = "default"
     for column in ("origin_date", "target_date"):
         frame[column] = pd.to_datetime(frame[column], errors="raise")
         if frame[column].isna().any():
             raise ValueError("forecast dates must be valid")
-    for column in ("model", "asset"):
+    for column in ("model", "series"):
         if (
             not frame[column]
             .map(lambda value: isinstance(value, str) and bool(value.strip()))
@@ -69,8 +69,8 @@ def validated_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
     frame[["actual", "predicted"]] = numbers
     if not (frame.origin_date < frame.target_date).all():
         raise ValueError("target dates must follow their forecast origins")
-    if frame.duplicated(["asset", "model", "target_date"]).any():
-        raise ValueError("each model must have one forecast per target date within an asset")
+    if frame.duplicated(["series", "model", "target_date"]).any():
+        raise ValueError("each model must have one forecast per target date within a series")
     if "n_train" in frame and (
         not pd.to_numeric(frame.n_train, errors="raise")
         .map(lambda value: not isinstance(value, bool) and value >= 1 and int(value) == value)

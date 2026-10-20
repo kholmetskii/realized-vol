@@ -31,19 +31,19 @@ def test_forecast_records_allow_models_with_different_samples(forecast_table, di
     validated = validated_forecasts(forecast_table)
 
     pd.testing.assert_frame_equal(validated[original.columns], original)
-    assert validated.asset.tolist() == ["default"] * 4
+    assert validated.series.tolist() == ["default"] * 4
     pd.testing.assert_frame_equal(forecast_table, original)
 
 
-def test_overlapping_dates_are_unique_within_each_asset(forecast_table):
-    first = forecast_table.assign(asset="EURUSD")
-    second = first.assign(asset="GBPUSD")
+def test_overlapping_dates_are_unique_within_each_series(forecast_table):
+    first = forecast_table.assign(series="EURUSD")
+    second = first.assign(series="GBPUSD")
     combined = pd.concat([first, second], ignore_index=True)
 
     validated = validated_forecasts(combined)
 
     assert len(validated) == 8
-    assert validated["asset"].nunique() == 2
+    assert validated["series"].nunique() == 2
     duplicate = pd.concat([combined, first.iloc[:1]], ignore_index=True)
-    with pytest.raises(ValueError, match="within an asset"):
+    with pytest.raises(ValueError, match="within a series"):
         validated_forecasts(duplicate)

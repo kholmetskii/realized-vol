@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
-from rvol.evaluation import MAEMetric, MSEMetric, evaluate
+from rvol.evaluation import evaluate
 from rvol.models import (
     AR1Model,
     ConstantPredictor,
@@ -14,6 +14,7 @@ from rvol.models import (
 )
 from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 from tests.forecasting_helpers import lag_features
+from tests.metrics import MAEMetric, MSEMetric
 
 
 @pytest.mark.parametrize("window", ["expanding", "rolling"])
@@ -37,7 +38,7 @@ def test_same_model_and_execution_work_for_arbitrary_subjects(window, subject, s
     forecasts = runner.run(prepared, model=model, feature_columns=("lag_0",))
     assert isinstance(forecasts, pd.DataFrame)
     np.testing.assert_allclose(forecasts.predicted, forecasts.actual, atol=1e-10)
-    evaluation = evaluate(forecasts)
+    evaluation = evaluate(forecasts, metrics=(MSEMetric(),))
     assert evaluation.summaries.metric.tolist() == ["MSE"]
     assert evaluation.summaries.mean_loss.iloc[0] < 1e-15
 

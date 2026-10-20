@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from rvol.data.market import MIN_SESSION_HOURS, full_sessions, session_labels
-from rvol.estimators import daily_observation_count, daily_realized_variance
+from rvol.estimators import last_tick_sample, sampled_realized_variance
 
 
 def _read_mid_prices(path: pathlib.Path) -> pd.Series:
@@ -44,8 +44,10 @@ def _summarize_sessions(
     if complete.empty:
         return pd.DataFrame(columns=["date", f"rv_{frequency}", "log_rv", "observation_count"])
 
-    rv = daily_realized_variance(complete, frequency)
-    counts = daily_observation_count(complete, frequency).reindex(rv.index)
+    sessions = complete.groupby(session_labels(complete))
+    rv = sessions.apply(lambda session: sampled_realized_variance(session, frequency)).dropna()
+    counts = sessions.apply(lambda session: float(len(last_tick_sample(session, frequency))))
+    counts = counts.reindex(rv.index)
     rv_name = f"rv_{frequency}"
     result = pd.DataFrame({
         "date": pd.to_datetime(rv.index),

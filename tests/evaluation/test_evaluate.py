@@ -5,12 +5,10 @@ import pytest
 from rvol.evaluation import (
     ComparisonOutcome,
     DieboldMarianoTest,
-    MAEMetric,
-    MSEMetric,
     diebold_mariano,
     evaluate,
-    validate_evaluation,
 )
+from tests.metrics import MAEMetric, MSEMetric
 
 
 def sample_forecasts(n=20):
@@ -81,6 +79,7 @@ def test_pairwise_test_matches_the_existing_dm_formula():
     forecasts = sample_forecasts()
     result = evaluate(
         forecasts,
+        metrics=(MSEMetric(),),
         comparison_pairs=(("baseline", "candidate"),),
         comparison_tests=(DieboldMarianoTest(hac_lags=0),),
     )
@@ -94,12 +93,15 @@ def test_pairwise_test_matches_the_existing_dm_formula():
 
 def test_default_dm_lag_selection_and_explicit_settings_match_the_numerical_test():
     forecasts = sample_forecasts(20)
-    result = evaluate(forecasts, comparison_pairs=(("baseline", "candidate"),))
+    result = evaluate(
+        forecasts, metrics=(MSEMetric(),), comparison_pairs=(("baseline", "candidate"),)
+    )
     pivot = result.losses.pivot(index="target_date", columns="model", values="loss")
     expected = diebold_mariano(pivot.baseline, pivot.candidate)
     assert result.comparisons.test_parameters.iloc[0] == expected.parameters
     explicit = evaluate(
         forecasts,
+        metrics=(MSEMetric(),),
         comparison_pairs=(("baseline", "candidate"),),
         comparison_tests=(DieboldMarianoTest(hac_lags=0),),
     )
@@ -160,7 +162,7 @@ def test_invalid_metric_outputs_are_rejected(values):
 )
 def test_invalid_metric_and_comparison_choices_are_rejected(options):
     with pytest.raises(ValueError):
-        evaluate(sample_forecasts(), **options)
+        evaluate(sample_forecasts(), **{"metrics": (MSEMetric(),), **options})
 
 
 @pytest.mark.parametrize(
@@ -173,7 +175,7 @@ def test_invalid_metric_and_comparison_choices_are_rejected(options):
         "nonfinite_actual",
         "nonfinite_prediction",
         "empty_model",
-        "mixed_asset",
+        "mixed_series",
         "invalid_interval",
         "partial_fit_dates",
         "future_fit",
@@ -196,9 +198,9 @@ def test_invalid_or_misaligned_forecast_tables_are_rejected(corruption):
         frame.loc[0, "predicted"] = np.inf
     elif corruption == "empty_model":
         frame.loc[0, "model"] = ""
-    elif corruption == "mixed_asset":
-        frame["asset"] = "one"
-        frame.loc[0, "asset"] = "two"
+    elif corruption == "mixed_series":
+        frame["series"] = "one"
+        frame.loc[0, "series"] = "two"
     elif corruption == "invalid_interval":
         frame.loc[0, "origin_date"] = frame.loc[0, "target_date"]
     elif corruption == "partial_fit_dates":
@@ -209,43 +211,20 @@ def test_invalid_or_misaligned_forecast_tables_are_rejected(corruption):
     else:
         frame = frame.iloc[:0]
     with pytest.raises(ValueError):
-        evaluate(frame)
+        evaluate(frame, metrics=(MSEMetric(),))
 
 
-@pytest.mark.parametrize("consumer", ["evaluate", "validate_evaluation"])
-@pytest.mark.parametrize("problem", ["unaligned", "mixed_asset"])
-def test_evaluation_consumers_enforce_one_asset_and_a_common_sample(consumer, problem):
+@pytest.mark.parametrize("problem", ["unaligned", "mixed_series"])
+def test_evaluation_requires_one_series_and_a_common_sample(problem):
     frame = sample_forecasts()
-    evaluation = evaluate(frame)
     if problem == "unaligned":
         selected = frame.model == "candidate"
         frame.loc[selected, ["origin_date", "target_date"]] += pd.Timedelta(days=30)
         message = "identical dates and actual values"
     else:
-        frame["asset"] = "EURUSD"
-        frame.loc[0, "asset"] = "GBPUSD"
-        message = "each asset separately"
+        frame["series"] = "one"
+        frame.loc[0, "series"] = "two"
+        message = "each series separately"
 
     with pytest.raises(ValueError, match=message):
-        if consumer == "evaluate":
-            evaluate(frame)
-        else:
-            validate_evaluation(frame, evaluation)
-
-
-@pytest.mark.parametrize(
-    "corruption", ["prediction", "tiny_prediction", "missing_loss", "duplicate_loss"]
-)
-def test_reports_cannot_reuse_an_evaluation_of_different_forecasts(corruption):
-    forecasts = sample_forecasts()
-    evaluation = evaluate(forecasts, comparison_pairs=(("baseline", "candidate"),))
-    if corruption == "prediction":
-        forecasts.predicted += 1
-    elif corruption == "tiny_prediction":
-        forecasts.predicted += 1e-10
-    elif corruption == "missing_loss":
-        evaluation.losses = evaluation.losses.iloc[1:]
-    else:
-        evaluation.losses = pd.concat([evaluation.losses, evaluation.losses.iloc[:1]])
-    with pytest.raises(ValueError):
-        validate_evaluation(forecasts, evaluation)
+        evaluate(frame, metrics=(MSEMetric(),))

@@ -1,4 +1,4 @@
-"""Sampling grids for irregular timestamped market observations."""
+"""Regular time grids for irregularly timestamped prices."""
 
 from __future__ import annotations
 

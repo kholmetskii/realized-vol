@@ -15,7 +15,7 @@ class EWMAModel(ForecastModel):
 
     name: ClassVar[str] = "EWMA"
 
-    def __init__(self, decay: float = 0.94) -> None:
+    def __init__(self, decay: float) -> None:
         validate_decay(decay)
         self._decay = decay
 

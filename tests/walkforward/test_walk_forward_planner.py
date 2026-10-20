@@ -83,7 +83,7 @@ def test_plans_without_reportable_forecasts_preserve_execution_metadata(settings
 
 
 def test_planner_accepts_an_empty_validated_timeline():
-    plan = WalkForwardPlanner().build(pd.DatetimeIndex([]), pd.DatetimeIndex([]))
+    plan = WalkForwardPlanner(min_train_size=1).build(pd.DatetimeIndex([]), pd.DatetimeIndex([]))
 
     assert plan.steps == ()
     assert plan.execution["schedule_anchor"] is None
