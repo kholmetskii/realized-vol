@@ -7,8 +7,8 @@ from rvol.data.preparation import (
     build_next_observation_targets,
     prepare_forecast_data,
 )
-from rvol.models import HistoricalMeanModel
-from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
+from rvol.models import ForecastModel, LinearRegression
+from rvol.walkforward import walk_forward
 
 
 def daily_sample(n: int = 16) -> pd.DataFrame:
@@ -74,9 +74,8 @@ def test_independent_plain_builders_need_no_specification_or_shared_base_class()
         }
     )
     prepared = prepare_forecast_data(features, targets)
-    forecasts = WalkForwardRunner(WalkForwardPlanner(min_train_size=2)).run(
-        prepared, model=HistoricalMeanModel()
-    )
+    mean = ForecastModel("historical_mean", LinearRegression())
+    forecasts = walk_forward(prepared, mean, min_train_size=2)
     assert not forecasts.empty
     for row in forecasts.itertuples():
         available = prepared.loc[prepared.target_date <= row.origin_date]

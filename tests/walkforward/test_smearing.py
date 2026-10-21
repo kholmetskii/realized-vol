@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.evaluation import QLikeMetric, evaluate
+from rvol.evaluation import forecast_losses, qlike
 from rvol.walkforward import smeared_forecasts
 
 
@@ -106,9 +106,8 @@ def test_smearing_lowers_qlike_for_unbiased_log_forecasts():
     naive = smeared["predicted"] / smeared["smearing_factor"]
 
     actual = smeared["actual"].to_numpy()
-    qlike = QLikeMetric()
-    assert qlike.losses(actual, smeared["predicted"].to_numpy()).mean() < (
-        qlike.losses(actual, naive.to_numpy()).mean()
+    assert qlike(actual, smeared["predicted"].to_numpy()).mean() < (
+        qlike(actual, naive.to_numpy()).mean()
     )
 
 
@@ -123,11 +122,10 @@ def test_output_can_be_evaluated_with_variance_scale_qlike():
     )
 
     smeared = smeared_forecasts(frame, min_errors=5)
-    evaluation = evaluate(smeared, metrics=(QLikeMetric(),), comparison_pairs=[("A", "B")])
+    losses = forecast_losses(smeared, qlike)
 
-    actual_values = smeared["actual"].to_numpy()
-    expected = QLikeMetric().losses(actual_values, smeared["predicted"].to_numpy())
-    assert np.allclose(evaluation.losses.sort_values(["model", "target_date"])["loss"], expected)
+    expected = qlike(smeared["actual"].to_numpy(), smeared["predicted"].to_numpy())
+    assert np.allclose(losses.sort_values(["model", "target_date"])["loss"], expected)
 
 
 @pytest.mark.parametrize("min_errors", [0, -1, 1.5, True])

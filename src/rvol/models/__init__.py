@@ -1,33 +1,21 @@
-"""Numerical algorithms with their fitted predictors and shared interfaces."""
+"""Forecasting rules and the models built from them.
 
-from rvol.models.ar1_model import AR1Model
+A rule says how a forecast is computed and estimated: LinearRegression (least
+squares, optionally ridge-penalized) or ExponentialSmoothing (fixed weights). A
+ForecastModel names a rule applied to chosen regressors; the historical mean,
+AR(1) and HAR are all LinearRegression with different regressors.
+"""
+
 from rvol.models.arrays import FloatArray
-from rvol.models.constant_predictor import ConstantPredictor
-from rvol.models.ewma_model import EWMAModel
-from rvol.models.ewma_predictor import EWMAPredictor
-from rvol.models.feature_column_predictor import FeatureColumnPredictor
+from rvol.models.exponential_smoothing import ExponentialSmoothing
 from rvol.models.forecast_model import ForecastModel
-from rvol.models.har_model import HARModel
-from rvol.models.historical_mean_model import HistoricalMeanModel
-from rvol.models.linear_predictor import LinearPredictor
-from rvol.models.linear_regression_model import LinearRegressionModel
-from rvol.models.naive_model import NaiveModel
-from rvol.models.predictor import Predictor
-from rvol.models.updatable_predictor import UpdatablePredictor
+from rvol.models.forecast_rule import ForecastRule
+from rvol.models.linear_regression import LinearRegression
 
 __all__ = [
-    "AR1Model",
-    "ConstantPredictor",
-    "EWMAModel",
-    "EWMAPredictor",
-    "FeatureColumnPredictor",
+    "ExponentialSmoothing",
     "FloatArray",
     "ForecastModel",
-    "HARModel",
-    "HistoricalMeanModel",
-    "LinearPredictor",
-    "LinearRegressionModel",
-    "NaiveModel",
-    "Predictor",
-    "UpdatablePredictor",
+    "ForecastRule",
+    "LinearRegression",
 ]

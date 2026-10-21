@@ -1,13 +1,13 @@
 import pandas as pd
 import pytest
 
-from rvol.evaluation import diebold_mariano, evaluate, hac_sensitivity, win_rates
-from tests.evaluation.test_evaluate import sample_forecasts
-from tests.metrics import MSEMetric
+from rvol.evaluation import diebold_mariano, forecast_losses, hac_sensitivity, win_rates
+from tests.evaluation.test_scoring import sample_forecasts
+from tests.losses import squared_error
 
 
 def losses_of(forecasts):
-    return evaluate(forecasts, metrics=(MSEMetric(),)).losses
+    return forecast_losses(forecasts, squared_error)
 
 
 def test_a_uniformly_better_candidate_wins_every_date():
@@ -35,8 +35,10 @@ def test_each_lag_repeats_the_dm_test_on_existing_losses():
     assert table.hac_lags.tolist() == [0, 1, 3]
     pivot = losses.pivot(index="target_date", columns="model", values="loss")
     for row in table.itertuples():
-        expected = diebold_mariano(pivot.baseline, pivot.candidate, hac_lags=int(row.hac_lags))
-        assert row.statistic == expected.statistic and row.p_value == expected.p_value
+        statistic, p_value = diebold_mariano(
+            pivot.baseline, pivot.candidate, hac_lags=int(row.hac_lags)
+        )
+        assert row.statistic == statistic and row.p_value == p_value
 
 
 @pytest.mark.parametrize("lags", [(), (0, 0), (-1,), (1.5,), (True,)])

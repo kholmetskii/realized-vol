@@ -33,7 +33,10 @@ only half the days, but avoids the large misses.
    a noisy measure of true variance (Patton, 2011). Each model is tested against
    HAR with a one-sided Diebold–Mariano test.
 
-Models: historical mean, naive, EWMA, AR(1), HAR (Corsi, 2009).
+Models: two forecasting rules and their special cases. Exponential smoothing
+with fixed weights gives the naive forecast (decay 0) and EWMA (decay 0.94);
+least-squares linear regression gives the historical mean (no regressors),
+AR(1) and HAR (Corsi, 2009).
 
 ## Usage
 
@@ -51,18 +54,14 @@ from pathlib import Path
 
 from rvol import experiment
 from rvol.data.volatility import build_daily_dataset
-from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
 
 daily = build_daily_dataset(sorted(Path("data/ticks/EURUSD").glob("*.parquet")))
-runner = WalkForwardRunner(
-    WalkForwardPlanner(
-        min_train_size=252,
-        forecast_start=date(2024, 10, 1),  # Oct–Dec 2024 only calibrates smearing
-        forecast_end=date(2026, 9, 30),
-    )
-)
 forecasts = experiment.forecast(
-    experiment.prepare(daily), experiment.benchmark_models(), runner, asset="EURUSD"
+    experiment.prepare(daily),
+    experiment.benchmark_models(),
+    start=date(2024, 10, 1),  # Oct–Dec 2024 only calibrates smearing
+    end=date(2026, 9, 30),
+    asset="EURUSD",
 )
 comparison = experiment.compare(forecasts, evaluation_start=date(2025, 1, 1))
 print(experiment.results_table(comparison))
@@ -74,33 +73,31 @@ The full study, with figures and explanations, is one notebook per asset:
 
 ## Extending
 
-Each piece is a small class; no registration is needed.
-
 | add a | implement | pass to |
 |---|---|---|
-| model | `name`, `fit(X, y)` → predictor with `predict(X)` | `experiment.forecast` |
-| metric | `name`, `losses(actual, predicted)` | `evaluate(metrics=...)` |
-| test | `name`, `compare(baseline_loss, candidate_loss)` | `evaluate(comparison_tests=...)` |
+| forecasting rule | a class with `fit(X, y)` returning itself and `predict(X)` | `ForecastModel(name, rule, regressors)` |
+| model | `ForecastModel(name, rule, regressors)`, e.g. `ForecastModel("HAR-ridge", LinearRegression(ridge=1.0), HAR_FEATURES)` | `experiment.forecast` or `walk_forward` |
+| loss | a function `loss(actual, predicted)` returning one loss per forecast | `forecast_losses` |
 
 ## Project layout
 
 ```text
 src/rvol/
-├── data/          download, sessions, daily RV, storage
+├── data/          download, sessions, daily RV, forecasting tables
 ├── estimators/    realized variance
 ├── models/        forecasting models
-├── walkforward/   walk-forward fitting and forecasting
-├── evaluation/    metrics, tests, robustness checks
+├── walkforward/   walk-forward forecasts, smearing
+├── evaluation/    losses, Diebold–Mariano test, robustness checks
 └── experiment.py  the full comparison
 notebooks/         one study per asset
 tests/             mirrors src/rvol/
 ```
 
-One public class per file (`HARModel` → `har_model.py`); each package exports
+One public class per file (`LinearRegression` → `linear_regression.py`); each package exports
 its API from `__init__.py`.
 
-`models`, `walkforward`, `evaluation`, `data.preparation` and `data.storage` know
-nothing about volatility or markets; a test checks their imports and vocabulary.
+`models`, `walkforward`, `evaluation` and `data.preparation` know nothing about
+volatility or markets; a test checks their imports and vocabulary.
 Domain code lives in `data.sources`, `data.market`, `data.volatility` and
 `estimators`, and `experiment.py` combines the two.
 

@@ -1,81 +1,46 @@
 import subprocess
 import sys
 from datetime import date
-from typing import Literal
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from rvol import experiment
-from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
-from rvol.evaluation import evaluate
-from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
-from tests.forecasting_helpers import (
-    benchmark_models,
-    daily_sample,
-    har_features,
-    prepared_variance,
-)
-from tests.metrics import MSEMetric
+from rvol.evaluation import win_rates
+from rvol.models import ForecastModel
 
-
-def test_changing_future_data_cannot_change_earlier_predictions():
-    daily = daily_sample()
-    changed = daily.copy()
-    changed.loc[65:, "log_rv"] += 1
-    cutoff = daily.date.iloc[65]
-    runner = WalkForwardRunner(WalkForwardPlanner(min_train_size=15, refit_every=5))
-    for model, columns in benchmark_models():
-
-        def prepare(frame, selected=columns):
-            return prepare_forecast_data(
-                har_features(selected)(frame),
-                build_next_observation_targets(frame, value_col="log_rv"),
-            )
-
-        first = runner.run(prepare(daily), model=model, feature_columns=columns)
-        second = runner.run(prepare(changed), model=model, feature_columns=columns)
-        pd.testing.assert_series_equal(
-            first.loc[first.origin_date < cutoff, "predicted"],
-            second.loc[second.origin_date < cutoff, "predicted"],
-        )
+START, END = date(2024, 10, 1), date(2026, 9, 30)
+EVALUATION_START = date(2025, 1, 1)
 
 
 def test_forecasting_and_experiment_imports_do_not_load_matplotlib():
     code = """
 import sys
 import pandas as pd
-from rvol.data.preparation import prepare_forecast_data
-from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
-from rvol.data.preparation import build_next_observation_targets
-from rvol.models import AR1Model
-from rvol.evaluation import evaluate
+from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
+from rvol.evaluation import forecast_losses
+from rvol.models import ForecastModel, LinearRegression
+from rvol.walkforward import walk_forward
 from rvol import experiment
 data = pd.DataFrame({'date': pd.date_range('2024-01-01', periods=20), 'value': range(20)})
 features = pd.DataFrame({'origin_date': data.date, 'lag_0': data.value.astype(float)})
 prepared = prepare_forecast_data(features, build_next_observation_targets(data))
-forecasts = WalkForwardRunner(WalkForwardPlanner(min_train_size=5)).run(
-    prepared, model=AR1Model(), feature_columns=("lag_0",)
-)
-class Squared:
-    name = 'squared'
-    def losses(self, actual, predicted):
-        return (actual - predicted) ** 2
-evaluate(forecasts, metrics=(Squared(),))
+model = ForecastModel('AR1', LinearRegression(), ('lag_0',))
+forecasts = walk_forward(prepared, model, min_train_size=5)
+forecast_losses(forecasts, lambda actual, predicted: (actual - predicted) ** 2)
 assert 'matplotlib' not in sys.modules
 """
     completed = subprocess.run([sys.executable, "-c", code], text=True, capture_output=True)
     assert completed.returncode == 0, completed.stderr
 
 
-def test_importing_models_and_runner_loads_no_preparation_or_evaluation():
+def test_importing_models_and_walk_forward_loads_no_preparation_or_evaluation():
     code = """
 import sys
-from rvol.walkforward import WalkForwardPlanner, WalkForwardRunner
-from rvol.models import AR1Model
-for prefix in ('rvol.data', 'rvol.evaluation', 'rvol.experiment',
-               'matplotlib', 'scipy'):
+from rvol.walkforward import walk_forward
+from rvol.models import ForecastModel, LinearRegression
+for prefix in ('rvol.data', 'rvol.evaluation', 'rvol.experiment', 'matplotlib', 'scipy'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 """
     completed = subprocess.run([sys.executable, "-c", code], text=True, capture_output=True)
@@ -92,76 +57,59 @@ def daily_series(n: int = 600) -> pd.DataFrame:
     )
 
 
-def runner_for(window: Literal["expanding", "rolling"] = "expanding") -> WalkForwardRunner:
-    return WalkForwardRunner(
-        WalkForwardPlanner(
-            window=window,
-            window_size=252 if window == "rolling" else None,
-            min_train_size=252,
-            forecast_start=date(2024, 10, 1),
-            forecast_end=date(2026, 9, 30),
-        )
-    )
+def study_forecasts(models=None) -> pd.DataFrame:
+    models = experiment.benchmark_models() if models is None else models
+    prepared = experiment.prepare(daily_series())
+    return experiment.forecast(prepared, models, start=START, end=END, asset="test")
 
 
-EVALUATION_START = date(2025, 1, 1)
-
-
-@pytest.mark.parametrize(
-    "window, custom_model", [("expanding", False), ("rolling", False), ("expanding", True)]
-)
-def test_compare_scores_smeared_variance_forecasts_on_the_same_dates(window, custom_model):
-    from rvol.models import ConstantPredictor
-
+@pytest.mark.parametrize("custom_model", [False, True])
+def test_compare_scores_smeared_variance_forecasts_on_the_same_dates(custom_model):
     class CustomMean:
-        name = "custom_mean"
-
         def fit(self, features, target):
-            return ConstantPredictor(float(np.mean(target)), n_features=features.shape[1])
+            self.mean = float(np.mean(target))
+            return self
+
+        def predict(self, features):
+            return np.full(len(features), self.mean)
 
     models = experiment.benchmark_models()
     if custom_model:
-        models = (*models[1:], (CustomMean(), ()))
-    forecasts = experiment.forecast(
-        experiment.prepare(daily_series()), models, runner_for(window), asset="test"
-    )
+        models = (*models[1:], ForecastModel("custom_mean", CustomMean()))
 
-    comparison = experiment.compare(forecasts, evaluation_start=EVALUATION_START)
+    comparison = experiment.compare(study_forecasts(models), evaluation_start=EVALUATION_START)
 
-    names = {model.name for model, _ in models}
-    assert set(comparison.evaluation.summaries.model) == names
-    assert set(comparison.evaluation.summaries.metric) == {"QLIKE"}
-    assert set(comparison.evaluation.comparisons.candidate_model) == {"HAR"}
+    names = {model.name for model in models}
+    assert set(comparison.summary.model) == names
+    assert set(comparison.losses.model) == names
+    assert comparison.summary.set_index("model").loc["HAR", ["p_value"]].isna().all()
     variance = comparison.forecasts
     assert variance.target_date.min() >= pd.Timestamp(EVALUATION_START)
     assert variance.groupby("model").target_date.apply(tuple).nunique() == 1
     assert (variance.smearing_factor > 0).all()
     assert (variance.actual > 0).all() and (variance.predicted > 0).all()
-    if window == "rolling":
-        assert set(variance.n_train) == {252}
+    assert set(variance.series) == {"test"}
 
 
-def test_results_table_summarises_the_evaluation():
-    forecasts = experiment.forecast(
-        experiment.prepare(daily_series()), experiment.benchmark_models(), runner_for()
-    )
-    comparison = experiment.compare(forecasts, evaluation_start=EVALUATION_START)
+def test_results_table_summarises_the_comparison():
+    comparison = experiment.compare(study_forecasts(), evaluation_start=EVALUATION_START)
 
     table = experiment.results_table(comparison)
 
-    qlike = comparison.evaluation.summaries.set_index("model").mean_loss
-    pd.testing.assert_series_equal(table["QLIKE"], qlike.loc[table.index], check_names=False)
+    summary = comparison.summary.set_index("model")
+    pd.testing.assert_series_equal(
+        table["QLIKE"], summary.mean_loss.loc[table.index], check_names=False
+    )
     assert table["QLIKE"].is_monotonic_increasing
-    assert table.loc["HAR", "QLIKE: HAR lower by"] == 0
-    tests = comparison.evaluation.comparisons.set_index("baseline_model").p_value
-    np.testing.assert_allclose(table.loc[tests.index, "QLIKE: DM p-value"], tests)
-    assert pd.isna(table.loc["HAR", "HAR wins (QLIKE)"])
+    assert table.loc["HAR", "HAR lower by"] == 0
+    np.testing.assert_allclose(table["DM p-value"], summary.p_value.loc[table.index])
+    wins = win_rates(comparison.losses, "HAR").set_index("baseline_model").candidate_win_rate
+    np.testing.assert_allclose(table["HAR wins"].drop("HAR"), wins.loc[table.index.drop("HAR")])
+    assert pd.isna(table.loc["HAR", "HAR wins"])
 
 
 def test_compare_rejects_a_missing_candidate_or_an_empty_window():
-    forecasts = experiment.forecast(
-        experiment.prepare(daily_series()), experiment.benchmark_models()[:2], runner_for()
-    )
+    forecasts = study_forecasts(experiment.benchmark_models()[:2])
     with pytest.raises(ValueError, match="candidate"):
         experiment.compare(forecasts, evaluation_start=EVALUATION_START)
     with pytest.raises(ValueError, match="evaluation_start"):
@@ -170,46 +118,4 @@ def test_compare_rejects_a_missing_candidate_or_an_empty_window():
 
 def test_forecast_requires_at_least_one_model():
     with pytest.raises(ValueError, match="at least one model"):
-        experiment.forecast(experiment.prepare(daily_series()), (), runner_for())
-
-
-def test_separate_models_share_an_explicit_comparison_sample():
-    data = prepared_variance()
-    runner = WalkForwardRunner(WalkForwardPlanner(min_train_size=15))
-    forecasts = pd.concat(
-        [
-            runner.run(data, model=model, feature_columns=columns)
-            for model, columns in benchmark_models()
-        ],
-        ignore_index=True,
-    )
-    evaluation = evaluate(forecasts, metrics=(MSEMetric(),), comparison_pairs=(("naive", "HAR"),))
-    assert len(evaluation.summaries) == 5
-    assert forecasts.groupby("model").target_date.apply(list).map(tuple).nunique() == 1
-    assert len(evaluation.comparisons) == 1
-
-
-def test_compare_accepts_other_metrics_and_tests():
-    from rvol.evaluation import ComparisonOutcome, DieboldMarianoTest, QLikeMetric
-    from tests.metrics import MAEMetric
-
-    class SignTest:
-        name = "sign"
-
-        def compare(self, baseline_loss, candidate_loss):
-            share = float(np.mean(candidate_loss < baseline_loss))
-            return ComparisonOutcome(share, 1 - share)
-
-    forecasts = experiment.forecast(
-        experiment.prepare(daily_series()), experiment.benchmark_models(), runner_for()
-    )
-    comparison = experiment.compare(
-        forecasts,
-        evaluation_start=EVALUATION_START,
-        metrics=(QLikeMetric(), MAEMetric()),
-        comparison_tests=(DieboldMarianoTest(), SignTest()),
-    )
-
-    assert set(comparison.evaluation.summaries.metric) == {"QLIKE", "MAE"}
-    table = experiment.results_table(comparison)
-    assert {"MAE: DM p-value", "QLIKE: sign p-value", "HAR wins (MAE)"} <= set(table.columns)
+        experiment.forecast(experiment.prepare(daily_series()), (), start=START, end=END)

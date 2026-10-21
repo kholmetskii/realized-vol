@@ -3,7 +3,7 @@
 Call these functions in order:
 
     prepared = prepare(daily)
-    forecasts = forecast(prepared, benchmark_models(), runner)
+    forecasts = forecast(prepared, benchmark_models(), start=..., end=...)
     comparison = compare(forecasts, evaluation_start=date(2025, 1, 1))
     results_table(comparison)
 
@@ -24,39 +24,23 @@ from rvol.data.preparation import (
     build_next_observation_targets,
     prepare_forecast_data,
 )
-from rvol.evaluation import (
-    EvaluationResult,
-    ForecastComparisonTest,
-    ForecastMetric,
-    QLikeMetric,
-    evaluate,
-    win_rates,
-)
-from rvol.models import (
-    AR1Model,
-    EWMAModel,
-    ForecastModel,
-    HARModel,
-    HistoricalMeanModel,
-    NaiveModel,
-)
-from rvol.walkforward import WalkForwardRunner, smeared_forecasts
+from rvol.evaluation import compare_models, forecast_losses, qlike, win_rates
+from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
+from rvol.walkforward import smeared_forecasts, walk_forward
 
 # HAR inputs (Corsi, 2009): the current log RV and its weekly and monthly means.
 HAR_WINDOWS = {"log_rv_daily": 1, "log_rv_weekly": 5, "log_rv_monthly": 22}
 HAR_FEATURES = tuple(HAR_WINDOWS)
 
-ModelSpec = tuple[ForecastModel, tuple[str, ...]]
 
-
-def benchmark_models() -> tuple[ModelSpec, ...]:
-    """The five models of the study, each with the feature columns it uses."""
+def benchmark_models() -> tuple[ForecastModel, ...]:
+    """The five models of the study: two forecasting rules with different regressors."""
     return (
-        (HistoricalMeanModel(), ()),
-        (NaiveModel(), ("log_rv_daily",)),
-        (EWMAModel(decay=0.94), ()),  # RiskMetrics daily decay
-        (AR1Model(), ("log_rv_daily",)),
-        (HARModel(), HAR_FEATURES),
+        ForecastModel("historical_mean", LinearRegression()),  # no regressors: the mean
+        ForecastModel("naive", ExponentialSmoothing(decay=0.0)),  # tomorrow equals today
+        ForecastModel("EWMA", ExponentialSmoothing(decay=0.94)),  # RiskMetrics daily decay
+        ForecastModel("AR1", LinearRegression(), ("log_rv_daily",)),
+        ForecastModel("HAR", LinearRegression(), HAR_FEATURES),
     )
 
 
@@ -73,28 +57,38 @@ def prepare(daily: pd.DataFrame) -> pd.DataFrame:
 
 def forecast(
     prepared: pd.DataFrame,
-    models: Sequence[ModelSpec],
-    runner: WalkForwardRunner,
+    models: Sequence[ForecastModel],
     *,
+    start: date | None = None,
+    end: date | None = None,
+    min_train_size: int = 252,
     asset: str = "default",
 ) -> pd.DataFrame:
-    """Run every model walk-forward and stack their log-RV forecasts."""
+    """Forecast next-session log RV walk-forward with every model and stack the results.
+
+    Each model is refitted every session on at least ``min_train_size`` observed
+    outcomes (252 sessions, about a year); ``start`` and ``end`` bound the target
+    dates.
+    """
     if not models:
         raise ValueError("at least one model is required")
     runs = [
-        runner.run(prepared, model=model, feature_columns=columns, series=asset)
-        for model, columns in models
+        walk_forward(
+            prepared, model, min_train_size=min_train_size, start=start, end=end, series=asset
+        )
+        for model in models
     ]
     return pd.concat(runs, ignore_index=True)
 
 
 @dataclass(frozen=True)
 class Comparison:
-    """Variance-scale forecasts and their evaluation."""
+    """Variance-scale forecasts, their QLIKE losses and the per-model summary."""
 
     candidate: str
     forecasts: pd.DataFrame
-    evaluation: EvaluationResult
+    losses: pd.DataFrame
+    summary: pd.DataFrame
 
 
 def compare(
@@ -103,20 +97,15 @@ def compare(
     evaluation_start: date,
     candidate: str = "HAR",
     smearing_min_errors: int = 20,
-    metrics: Sequence[ForecastMetric] | None = None,
-    comparison_tests: Sequence[ForecastComparisonTest] | None = None,
 ) -> Comparison:
-    """Convert log forecasts to variance with Duan smearing and score them.
+    """Convert log forecasts to variance with Duan smearing and score them with QLIKE.
 
     Forecasts before ``evaluation_start`` only supply errors for the smearing
-    factor. Every other model is tested against ``candidate``. Defaults: QLIKE
-    and the one-sided DM test.
+    factor. Every other model is tested against ``candidate`` with the one-sided
+    Diebold-Mariano test.
     """
-    selected_metrics = (QLikeMetric(),) if metrics is None else tuple(metrics)
-    models = sorted(log_forecasts["model"].unique())
-    if candidate not in models:
+    if candidate not in set(log_forecasts["model"]):
         raise ValueError(f"candidate {candidate!r} has no forecasts")
-    pairs = [(model, candidate) for model in models if model != candidate]
     smeared = smeared_forecasts(log_forecasts, min_errors=smearing_min_errors)
     window = (
         smeared.loc[smeared["target_date"] >= pd.Timestamp(evaluation_start)]
@@ -125,37 +114,23 @@ def compare(
     )
     if window.empty:
         raise ValueError("no forecasts on or after evaluation_start")
-    evaluation = evaluate(
-        window, metrics=selected_metrics, comparison_pairs=pairs, comparison_tests=comparison_tests
-    )
-    return Comparison(candidate, window, evaluation)
+    losses = forecast_losses(window, qlike)
+    return Comparison(candidate, window, losses, compare_models(losses, candidate))
 
 
 def results_table(comparison: Comparison) -> pd.DataFrame:
-    """One row per model: mean losses, the candidate's advantage, test p-values, win rate.
-
-    Columns repeat for every metric and every test. Rows are sorted by the first
-    metric.
-    """
+    """One row per model, best first: mean QLIKE, the candidate's advantage,
+    the DM p-value and the candidate's win rate."""
     candidate = comparison.candidate
-    summaries = comparison.evaluation.summaries
-    tests = comparison.evaluation.comparisons
-    columns: dict[str, pd.Series] = {}
-    for metric in summaries["metric"].unique():
-        means = summaries.loc[summaries["metric"] == metric].set_index("model")["mean_loss"]
-        columns[metric] = means
-        columns[f"{metric}: {candidate} lower by"] = 1 - means[candidate] / means
-        tested = tests.loc[tests["metric"] == metric]
-        for test_name in tested["test_name"].unique():
-            p_values = tested.loc[tested["test_name"] == test_name]
-            columns[f"{metric}: {test_name} p-value"] = p_values.set_index("baseline_model")[
-                "p_value"
-            ]
-    table = pd.DataFrame(columns)
-    wins = win_rates(comparison.evaluation.losses, candidate)
-    for metric, group in wins.groupby("metric", sort=False):
-        table[f"{candidate} wins ({metric})"] = group.set_index("baseline_model")[
-            "candidate_win_rate"
-        ]
+    summary = comparison.summary.set_index("model")
+    wins = win_rates(comparison.losses, candidate).set_index("baseline_model")
+    table = pd.DataFrame(
+        {
+            "QLIKE": summary["mean_loss"],
+            f"{candidate} lower by": 1 - summary.loc[candidate, "mean_loss"] / summary["mean_loss"],
+            "DM p-value": summary["p_value"],
+            f"{candidate} wins": wins["candidate_win_rate"],
+        }
+    )
     table.index.name = "model"
-    return table.sort_values(summaries["metric"].iloc[0])
+    return table.sort_values("QLIKE")

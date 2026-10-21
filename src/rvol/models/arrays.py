@@ -1,4 +1,4 @@
-"""Array types shared by models, predictors and their callers."""
+"""The array type models and losses work with."""
 
 import numpy as np
 from numpy.typing import NDArray

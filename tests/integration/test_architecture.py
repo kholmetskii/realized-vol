@@ -16,7 +16,6 @@ PACKAGE_DEPENDENCIES = {
     "data.preparation": {"data.preparation"},
     "data.sources": set(),
     "data.sources.dukascopy": {"data.sources.dukascopy"},
-    "data.storage": {"data.storage"},
     "data.market": {"data.market"},
     "data.volatility": {"data.volatility", "data.market", "estimators"},
     "estimators": {"estimators", "estimators.variance"},
@@ -102,7 +101,7 @@ def test_models_have_no_required_specification_or_domain_layer():
 
 
 # Packages that score, fit and prepare any series must not know what is forecast.
-GENERIC_PACKAGES = ("models", "walkforward", "evaluation", "data.preparation", "data.storage")
+GENERIC_PACKAGES = ("models", "walkforward", "evaluation", "data.preparation")
 DOMAIN_WORDS = re.compile(
     r"\b(?:volatil\w*|variance|realized|realised|rv|log_rv\w*|sessions?|fx|ticks?|assets?"
     r"|dukascopy|trading|eurusd|bid|ask|quotes?|prices?)\b",

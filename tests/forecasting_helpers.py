@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 import pandas as pd
 
@@ -12,15 +10,7 @@ from rvol.data.preparation import (
     build_next_observation_targets,
     prepare_forecast_data,
 )
-from rvol.models import (
-    AR1Model,
-    EWMAModel,
-    ForecastModel,
-    HARModel,
-    HistoricalMeanModel,
-    NaiveModel,
-    UpdatablePredictor,
-)
+from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
 
 
 def daily_sample(n: int = 85) -> pd.DataFrame:
@@ -40,13 +30,13 @@ def har_features(names: tuple[str, ...] = ALL_FEATURES) -> TrailingMeanFeatures:
     )
 
 
-def benchmark_models() -> tuple[tuple[ForecastModel, tuple[str, ...]], ...]:
+def benchmark_models() -> tuple[ForecastModel, ...]:
     return (
-        (HistoricalMeanModel(), ()),
-        (NaiveModel(), ("log_rv_daily",)),
-        (EWMAModel(decay=0.94), ()),
-        (AR1Model(), ("log_rv_daily",)),
-        (HARModel(), ALL_FEATURES),
+        ForecastModel("historical_mean", LinearRegression()),
+        ForecastModel("naive", ExponentialSmoothing(decay=0.0)),
+        ForecastModel("EWMA", ExponentialSmoothing(decay=0.94)),
+        ForecastModel("AR1", LinearRegression(), ("log_rv_daily",)),
+        ForecastModel("HAR", LinearRegression(), ALL_FEATURES),
     )
 
 
@@ -63,40 +53,21 @@ def prepared_variance(
 
 
 def reference_predictions(
-    data: pd.DataFrame,
-    model: ForecastModel,
-    *,
-    feature_columns: tuple[str, ...] = (),
-    min_train_size: int = 15,
-    window_size: int | None = None,
-    refit_every: int = 5,
+    data: pd.DataFrame, model: ForecastModel, *, min_train_size: int = 15
 ) -> pd.DataFrame:
-    """Rebuild fitted state from scratch for every forecast, using date filters."""
-    eligible: list[Any] = []
-    row: Any
-    for row in data.itertuples():
-        history = data.loc[data.target_date <= row.origin_date]
-        if window_size is not None:
-            history = history.tail(window_size)
-        if len(history) >= min_train_size:
-            eligible.append(row)
+    """Refit from scratch for every forecast, selecting training rows by date."""
+    columns = list(model.regressors)
     rows = []
-    for index, row in enumerate(eligible):
-        anchor = eligible[index - index % refit_every].origin_date
-        training = data.loc[data.target_date <= anchor]
-        if window_size is not None:
-            training = training.tail(window_size)
-        columns = list(feature_columns)
-        predictor = model.fit(training[columns].to_numpy(), training.target.to_numpy())
-        observed = data.loc[(data.target_date > anchor) & (data.target_date <= row.origin_date)]
-        if isinstance(predictor, UpdatablePredictor) and len(observed):
-            predictor = predictor.update(observed[columns].to_numpy(), observed.target.to_numpy())
+    for row in data.itertuples():
+        training = data.loc[data.target_date <= row.origin_date]
+        if len(training) < min_train_size:
+            continue
+        fitted = model.rule.fit(training[columns].to_numpy(), training.target.to_numpy())
         current = data.loc[[row.Index], columns].to_numpy()
         rows.append(
             {
                 "target_date": row.target_date,
-                "predicted": predictor.predict(current)[0],
-                "fit_date": anchor,
+                "predicted": fitted.predict(current)[0],
                 "n_train": len(training),
             }
         )

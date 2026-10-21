@@ -1,33 +1,10 @@
-"""The Diebold-Mariano test for comparing competing numerical forecasts."""
+"""The Diebold-Mariano test for comparing the losses of two forecasts."""
 
 from __future__ import annotations
-
-from typing import ClassVar
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.stats import norm
-
-from rvol.evaluation.comparison_outcome import ComparisonOutcome
-from rvol.models import FloatArray
-
-
-class DieboldMarianoTest:
-    """Configured adapter around the existing one-sided Newey-West DM test."""
-
-    name: ClassVar[str] = "DM"
-
-    def __init__(self, hac_lags: int | None = None) -> None:
-        self.hac_lags = hac_lags
-        if self.hac_lags is not None and (
-            isinstance(self.hac_lags, bool)
-            or not isinstance(self.hac_lags, int)
-            or self.hac_lags < 0
-        ):
-            raise ValueError("hac_lags must be a non-negative integer or None")
-
-    def compare(self, baseline_loss: FloatArray, candidate_loss: FloatArray) -> ComparisonOutcome:
-        return diebold_mariano(baseline_loss, candidate_loss, hac_lags=self.hac_lags)
 
 
 def _loss_vector(values: ArrayLike, name: str) -> NDArray[np.float64]:
@@ -39,7 +16,7 @@ def _loss_vector(values: ArrayLike, name: str) -> NDArray[np.float64]:
     return vector
 
 
-def _default_hac_lags(n_obs: int) -> int:
+def default_hac_lags(n_obs: int) -> int:
     """Newey-West's common sample-size rule, bounded by available lags."""
     rule = int(np.floor(4 * (n_obs / 100) ** (2 / 9)))
     return min(rule, n_obs - 2)
@@ -50,13 +27,14 @@ def diebold_mariano(
     candidate_loss: ArrayLike,
     *,
     hac_lags: int | None = None,
-) -> ComparisonOutcome:
+) -> tuple[float, float]:
     """Test whether a candidate's expected loss is lower than a baseline's.
 
-    The loss differential is ``baseline_loss - candidate_loss``. The reported
-    p-value is one-sided for the alternative that its expectation is positive. A
-    Bartlett-kernel Newey-West estimate allows the differential to be serially
-    correlated.
+    The loss differential is ``baseline_loss - candidate_loss``. Returns the
+    statistic and its one-sided p-value for the alternative that the expected
+    differential is positive. A Bartlett-kernel Newey-West estimate with
+    ``hac_lags`` lags (default: ``default_hac_lags``) allows the differential to
+    be serially correlated.
     """
     baseline = _loss_vector(baseline_loss, "baseline_loss")
     candidate = _loss_vector(candidate_loss, "candidate_loss")
@@ -64,7 +42,7 @@ def diebold_mariano(
         raise ValueError("baseline_loss and candidate_loss must have the same shape")
 
     n_obs = len(baseline)
-    lags = _default_hac_lags(n_obs) if hac_lags is None else hac_lags
+    lags = default_hac_lags(n_obs) if hac_lags is None else hac_lags
     if not 0 <= lags <= n_obs - 2:
         raise ValueError("hac_lags must satisfy 0 <= hac_lags <= n_obs - 2")
 
@@ -91,8 +69,4 @@ def diebold_mariano(
         statistic = mean_difference / standard_error
         p_value = float(norm.sf(statistic))
 
-    return ComparisonOutcome(
-        statistic=float(statistic),
-        p_value=p_value,
-        parameters={"hac_lags": lags},
-    )
+    return float(statistic), p_value

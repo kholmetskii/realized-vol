@@ -1,200 +1,130 @@
 import numpy as np
 import pytest
 
-from rvol.models import (
-    AR1Model,
-    ConstantPredictor,
-    EWMAModel,
-    EWMAPredictor,
-    FeatureColumnPredictor,
-    ForecastModel,
-    HARModel,
-    HistoricalMeanModel,
-    LinearPredictor,
-    LinearRegressionModel,
-    NaiveModel,
-    Predictor,
-    UpdatablePredictor,
-)
+from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
+
+
+def regression_data(n=40, seed=4):
+    rng = np.random.default_rng(seed)
+    features = rng.normal(size=(n, 3))
+    target = 2.0 + features @ np.array([0.5, -1.0, 3.0]) + rng.normal(0, 0.1, n)
+    return features, target
+
+
+def test_least_squares_recovers_an_exact_linear_relation():
+    rng = np.random.default_rng(4)
+    features = rng.normal(size=(30, 3))
+    target = 2.0 + features @ np.array([0.5, -1.0, 3.0])
+
+    model = LinearRegression().fit(features, target)
+
+    assert model.intercept == pytest.approx(2.0)
+    np.testing.assert_allclose(model.coefficients, [0.5, -1.0, 3.0])
+    np.testing.assert_allclose(model.predict(features[:2]), target[:2])
+
+
+def test_without_regressors_the_regression_forecasts_the_training_mean():
+    model = LinearRegression().fit(np.empty((3, 0)), np.array([1.0, 2.0, 6.0]))
+
+    np.testing.assert_allclose(model.predict(np.empty((2, 0))), [3.0, 3.0])
+
+
+def test_ridge_matches_its_closed_form_with_an_unpenalized_intercept():
+    features, target = regression_data()
+    ridge = 5.0
+
+    model = LinearRegression(ridge=ridge).fit(features, target)
+
+    x = features - features.mean(axis=0)
+    y = target - target.mean()
+    expected = np.linalg.solve(x.T @ x + ridge * np.eye(3), x.T @ y)
+    np.testing.assert_allclose(model.coefficients, expected)
+    assert model.intercept == pytest.approx(target.mean() - features.mean(axis=0) @ expected)
+
+
+def test_a_vanishing_penalty_approaches_least_squares():
+    features, target = regression_data()
+
+    ols = LinearRegression().fit(features, target)
+    ridge = LinearRegression(ridge=1e-10).fit(features, target)
+
+    np.testing.assert_allclose(ridge.coefficients, ols.coefficients, rtol=1e-8)
+    assert ridge.intercept == pytest.approx(ols.intercept)
+
+
+def test_a_large_penalty_shrinks_the_forecast_to_the_training_mean():
+    features, target = regression_data()
+
+    model = LinearRegression(ridge=1e12).fit(features, target)
+
+    np.testing.assert_allclose(model.coefficients, 0, atol=1e-9)
+    np.testing.assert_allclose(model.predict(features[:3]), target.mean(), atol=1e-8)
+
+
+def test_ridge_without_regressors_is_still_the_mean():
+    model = LinearRegression(ridge=1.0).fit(np.empty((3, 0)), np.array([1.0, 2.0, 6.0]))
+
+    np.testing.assert_allclose(model.predict(np.empty((1, 0))), [3.0])
+
+
+@pytest.mark.parametrize("ridge", [-1.0, float("nan"), float("inf")])
+def test_invalid_penalties_are_rejected(ridge):
+    with pytest.raises(ValueError, match="ridge"):
+        LinearRegression(ridge=ridge)
+
+
+def test_regression_needs_more_observations_than_regressors():
+    with pytest.raises(ValueError, match="more observations"):
+        LinearRegression().fit(np.ones((3, 3)), np.ones(3))
+
+
+def test_smoothing_applies_the_recursion_from_the_first_target():
+    # s1 = -3, s2 = 0.5 * -3 + 0.5 * 0 = -1.5, s3 = 0.5 * -1.5 + 0.5 * 9 = 3.75
+    model = ExponentialSmoothing(decay=0.5).fit(np.empty((3, 0)), np.array([-3.0, 0.0, 9.0]))
+
+    assert model.value == pytest.approx(3.75)
+    np.testing.assert_allclose(model.predict(np.empty((2, 0))), [3.75, 3.75])
+
+
+def test_smoothing_puts_weight_one_minus_decay_on_the_latest_target():
+    model = ExponentialSmoothing(decay=0.94).fit(np.empty((2, 0)), np.array([1.0, 9.0]))
+
+    assert model.value == pytest.approx(0.94 * 1.0 + 0.06 * 9.0)
+
+
+def test_zero_decay_is_the_naive_forecast_of_the_last_target():
+    model = ExponentialSmoothing(decay=0.0).fit(np.empty((3, 0)), np.array([4.0, -2.0, 7.5]))
+
+    np.testing.assert_array_equal(model.predict(np.empty((2, 0))), [7.5, 7.5])
+
+
+@pytest.mark.parametrize("decay", [1.0, -0.1, float("nan")])
+def test_smoothing_rejects_a_decay_outside_zero_to_one(decay):
+    with pytest.raises(ValueError, match="decay"):
+        ExponentialSmoothing(decay=decay)
+
+
+def test_refitting_replaces_the_previous_state():
+    model = LinearRegression()
+    model.fit(np.empty((2, 0)), np.array([1.0, 1.0]))
+    model.fit(np.empty((2, 0)), np.array([5.0, 5.0]))
+
+    np.testing.assert_allclose(model.predict(np.empty((1, 0))), [5.0])
+
+
+def test_a_model_names_a_rule_applied_to_chosen_regressors():
+    model = ForecastModel("HAR", LinearRegression(), ("daily", "weekly", "monthly"))
+
+    assert model.name == "HAR"
+    assert isinstance(model.rule, LinearRegression)
+    assert model.regressors == ("daily", "weekly", "monthly")
+    assert ForecastModel("mean", LinearRegression()).regressors == ()
 
 
 @pytest.mark.parametrize(
-    "model, n_features, expected_target",
-    [
-        pytest.param(HistoricalMeanModel(), 0, np.log(3.0), id="historical_mean"),
-        pytest.param(NaiveModel(), 1, np.log(9.0), id="naive"),
-        pytest.param(EWMAModel(decay=0.5), 0, 0.625 * np.log(9.0), id="EWMA"),
-        pytest.param(AR1Model(), 1, np.log(3.0), id="AR1"),
-        pytest.param(
-            HARModel(),
-            3,
-            np.log(3.0),
-            id="HAR",
-        ),
-    ],
+    "name, regressors",
+    [("", ()), (" ", ()), ("m", ("a", "a")), ("m", ("",)), ("m", ["a"]), ("m", "ab")],
 )
-def test_models_accept_log_targets_without_implicit_transformations(
-    model: ForecastModel,
-    n_features: int,
-    expected_target: float,
-):
-    training = np.zeros((4, n_features))
-    target = np.log([1.0, 9.0, 1.0, 9.0])
-    current = np.full((2, n_features), np.log(9.0))
-    original_training = training.copy()
-    original_target = target.copy()
-    original_current = current.copy()
-
-    fitted: Predictor = model.fit(training, target)
-    predicted = fitted.predict(current)
-
-    assert predicted.shape == (2,)
-    np.testing.assert_allclose(predicted, [expected_target] * 2)
-    np.testing.assert_array_equal(training, original_training)
-    np.testing.assert_array_equal(target, original_target)
-    np.testing.assert_array_equal(current, original_current)
-
-
-def test_fitting_creates_independent_predictor_state():
-    daily = np.arange(5, dtype="float64").reshape(-1, 1)
-    model = AR1Model()
-    fitted = model.fit(daily, daily[:, 0])
-    other = model.fit(daily, daily[:, 0] + 2.0)
-
-    assert fitted is not other
-    np.testing.assert_allclose(fitted.predict(daily), daily[:, 0], atol=1e-12)
-    np.testing.assert_allclose(other.predict(daily), daily[:, 0] + 2.0, atol=1e-12)
-
-
-@pytest.mark.parametrize(
-    "predictor, features, expected_state, predicted",
-    [
-        pytest.param(
-            LinearPredictor(1.0, (2.0, 3.0)),
-            np.array([[4.0, 5.0]]),
-            {"intercept": 1.0, "coefficients": (2.0, 3.0)},
-            [24.0],
-            id="linear",
-        ),
-        pytest.param(
-            ConstantPredictor(7.0, n_features=2),
-            np.array([[4.0, 5.0]]),
-            {"value": 7.0, "n_features": 2},
-            [7.0],
-            id="constant",
-        ),
-        pytest.param(
-            EWMAPredictor(8.0, decay=0.5),
-            np.empty((2, 0)),
-            {"value": 8.0, "decay": 0.5},
-            [8.0, 8.0],
-            id="EWMA",
-        ),
-        pytest.param(
-            FeatureColumnPredictor(n_features=2, column=1, offset=0.5),
-            np.array([[4.0, 5.0]]),
-            {"n_features": 2, "column": 1, "offset": 0.5},
-            [5.5],
-            id="feature_column",
-        ),
-    ],
-)
-def test_predictor_state_can_be_read_but_not_replaced(
-    predictor, features, expected_state, predicted
-):
-    for attribute, expected in expected_state.items():
-        assert getattr(predictor, attribute) == expected
-        with pytest.raises(AttributeError):
-            setattr(predictor, attribute, float("nan"))
-        assert getattr(predictor, attribute) == expected
-    np.testing.assert_array_equal(predictor.predict(features), predicted)
-
-
-@pytest.mark.parametrize(
-    "model, attribute, expected, features, target, future, prediction",
-    [
-        pytest.param(
-            EWMAModel(decay=0.5),
-            "decay",
-            0.5,
-            np.empty((2, 0)),
-            np.array([2.0, 6.0]),
-            np.empty((1, 0)),
-            [4.0],
-            id="EWMA",
-        ),
-        pytest.param(
-            NaiveModel(offset=2.0),
-            "offset",
-            2.0,
-            np.array([[1.0], [2.0]]),
-            np.array([2.0, 3.0]),
-            np.array([[10.0]]),
-            [12.0],
-            id="naive",
-        ),
-    ],
-)
-def test_validated_model_parameters_cannot_be_replaced(
-    model, attribute, expected, features, target, future, prediction
-):
-    assert getattr(model, attribute) == expected
-    with pytest.raises(AttributeError):
-        setattr(model, attribute, float("nan"))
-
-    np.testing.assert_array_equal(model.fit(features, target).predict(future), prediction)
-
-
-def test_models_reject_misaligned_training_arrays():
-    with pytest.raises(ValueError, match="same number of rows"):
-        HARModel().fit(np.ones((5, 3)), np.ones(4))
-
-
-@pytest.mark.parametrize(
-    "model, width, expected",
-    [
-        (AR1Model(), 0, 1),
-        (AR1Model(), 2, 1),
-        (AR1Model(), 3, 1),
-        (HARModel(), 0, 3),
-        (HARModel(), 1, 3),
-        (HARModel(), 2, 3),
-        (HARModel(), 4, 3),
-    ],
-)
-def test_named_autoregressions_reject_incompatible_feature_counts(model, width, expected):
-    with pytest.raises(ValueError, match=f"exactly {expected} columns"):
-        model.fit(np.zeros((8, width)), np.arange(8, dtype=float))
-
-
-@pytest.mark.parametrize("model, width", [(AR1Model(), 1), (HARModel(), 3)])
-def test_named_autoregressions_require_enough_observations_for_the_coefficients(model, width):
-    with pytest.raises(ValueError, match=f"at least {width + 1} observations"):
-        model.fit(np.zeros((width, width)), np.arange(width, dtype=float))
-
-
-@pytest.mark.parametrize(
-    "implementation, interface",
-    [
-        (AR1Model, ForecastModel),
-        (EWMAModel, ForecastModel),
-        (HARModel, ForecastModel),
-        (HistoricalMeanModel, ForecastModel),
-        (LinearRegressionModel, ForecastModel),
-        (NaiveModel, ForecastModel),
-        (ConstantPredictor, Predictor),
-        (EWMAPredictor, UpdatablePredictor),
-        (FeatureColumnPredictor, Predictor),
-        (LinearPredictor, Predictor),
-    ],
-)
-def test_implementations_declare_the_interface_they_implement(implementation, interface):
-    assert interface in implementation.__mro__
-
-
-def test_linear_regression_name_is_set_once_and_read_only():
-    model = LinearRegressionModel(name="custom")
-
-    assert model.name == "custom"
-    with pytest.raises(AttributeError):
-        model.name = "other"  # type: ignore[misc]
+def test_invalid_model_definitions_are_rejected(name, regressors):
+    with pytest.raises(ValueError):
+        ForecastModel(name, LinearRegression(), regressors)
