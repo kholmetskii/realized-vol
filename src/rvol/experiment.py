@@ -3,12 +3,15 @@
 Call these functions in order:
 
     prepared = prepare(daily)
-    forecasts = forecast(prepared, benchmark_models(), start=..., end=...)
-    comparison = compare(forecasts, evaluation_start=date(2025, 1, 1))
+    forecasts = forecast(prepared, benchmark_models(), asset="EURUSD")
+    comparison = compare(forecasts)
     results_table(comparison)
 
 Models forecast next-session log RV. ``compare`` converts those forecasts to the
 variance scale with Duan smearing and scores them with QLIKE and DM tests.
+
+The constants below are the study design: every function uses them as its
+defaults, so one asset's notebook and another's run the same study.
 """
 
 from __future__ import annotations
@@ -32,6 +35,22 @@ from rvol.walkforward import smeared_forecasts, walk_forward
 HAR_WINDOWS = {"log_rv_daily": 1, "log_rv_weekly": 5, "log_rv_monthly": 22}
 HAR_FEATURES = tuple(HAR_WINDOWS)
 
+#: A trailing window may span at most this many calendar days per session; a
+#: longer gap (a data outage, not a weekend or holiday) leaves the feature empty.
+MAX_GAP_DAYS = 7
+
+#: Every fit uses at least this many observed outcomes, about one year of sessions.
+MIN_TRAIN_SESSIONS = 252
+
+#: The first and last target dates forecast. Forecasts before EVALUATION_START
+#: only supply errors for the smearing factor; they are never scored.
+FORECAST_START = date(2024, 10, 1)
+EVALUATION_START = date(2025, 1, 1)
+FORECAST_END = date(2026, 9, 30)
+
+#: The model every other model is tested against.
+CANDIDATE = "HAR"
+
 
 def benchmark_models() -> tuple[ForecastModel, ...]:
     """The five models of the study: two forecasting rules with different regressors."""
@@ -51,7 +70,7 @@ def prepare(daily: pd.DataFrame) -> pd.DataFrame:
     One table holds all features, so every model forecasts the same dates.
     """
     return prepare_forecast_data(
-        TrailingMeanFeatures(HAR_WINDOWS, value_col="log_rv", max_gap_days=7)(daily),
+        TrailingMeanFeatures(HAR_WINDOWS, value_col="log_rv", max_gap_days=MAX_GAP_DAYS)(daily),
         build_next_observation_targets(daily, value_col="log_rv"),
     )
 
@@ -60,16 +79,15 @@ def forecast(
     prepared: pd.DataFrame,
     models: Sequence[ForecastModel],
     *,
-    start: date | None = None,
-    end: date | None = None,
-    min_train_size: int = 252,
+    start: date | None = FORECAST_START,
+    end: date | None = FORECAST_END,
+    min_train_size: int = MIN_TRAIN_SESSIONS,
     asset: str = "default",
 ) -> pd.DataFrame:
     """Forecast next-session log RV walk-forward with every model and stack the results.
 
     Each model is refitted every session on at least ``min_train_size`` observed
-    outcomes (252 sessions, about a year); ``start`` and ``end`` bound the target
-    dates.
+    outcomes; ``start`` and ``end`` bound the target dates (None: no bound).
     """
     if not models:
         raise ValueError("at least one model is required")
@@ -95,9 +113,8 @@ class Comparison:
 def compare(
     log_forecasts: pd.DataFrame,
     *,
-    evaluation_start: date,
-    candidate: str = "HAR",
-    smearing_min_errors: int = 20,
+    evaluation_start: date = EVALUATION_START,
+    candidate: str = CANDIDATE,
 ) -> Comparison:
     """Convert log forecasts to variance with Duan smearing and score them with QLIKE.
 
@@ -107,7 +124,7 @@ def compare(
     """
     if candidate not in set(log_forecasts["model"]):
         raise ValueError(f"candidate {candidate!r} has no forecasts")
-    smeared = smeared_forecasts(log_forecasts, min_errors=smearing_min_errors)
+    smeared = smeared_forecasts(log_forecasts)
     window = (
         smeared.loc[smeared["target_date"] >= pd.Timestamp(evaluation_start)]
         .sort_values(["model", "target_date"])

@@ -11,6 +11,14 @@ import pandas as pd
 from rvol.data.market import MIN_SESSION_HOURS, full_sessions, session_labels, session_window
 from rvol.estimators import last_tick_sample, sampled_realized_variance
 
+#: Five-minute prices: fine enough to measure the day's movement, coarse enough
+#: that bid-ask bounce does not dominate it (the usual compromise in the literature).
+SAMPLING_FREQUENCY = "5min"
+
+#: The output columns. ``rv`` is the session's realized variance at the chosen
+#: sampling frequency and ``observation_count`` the number of sampled prices.
+COLUMNS = ["date", "rv", "log_rv", "observation_count"]
+
 #: How far the data may start after the first session opens, or end before the
 #: last session closes, for those sessions to count as complete.
 EDGE_TOLERANCE = pd.Timedelta(hours=1)
@@ -42,33 +50,32 @@ def _summarize_sessions(
 ) -> pd.DataFrame:
     """Turn complete timestamped sessions into one row per trading day."""
     if prices.empty:
-        return pd.DataFrame(columns=["date", f"rv_{frequency}", "log_rv", "observation_count"])
+        return pd.DataFrame(columns=COLUMNS)
 
     complete = full_sessions(prices, min_hours=min_session_hours)
     if complete.empty:
-        return pd.DataFrame(columns=["date", f"rv_{frequency}", "log_rv", "observation_count"])
+        return pd.DataFrame(columns=COLUMNS)
 
     sessions = complete.groupby(session_labels(complete))
     rv = sessions.apply(lambda session: sampled_realized_variance(session, frequency)).dropna()
     counts = sessions.apply(lambda session: float(len(last_tick_sample(session, frequency))))
     counts = counts.reindex(rv.index)
-    rv_name = f"rv_{frequency}"
     result = pd.DataFrame(
         {
             "date": pd.to_datetime(rv.index),
-            rv_name: rv.to_numpy(dtype="float64"),
+            "rv": rv.to_numpy(dtype="float64"),
             "observation_count": counts.to_numpy(dtype="int64"),
         }
     )
-    result = result[np.isfinite(result[rv_name]) & (result[rv_name] > 0)].copy()
-    result["log_rv"] = np.log(result[rv_name])
-    return result[["date", rv_name, "log_rv", "observation_count"]]
+    result = result[np.isfinite(result["rv"]) & (result["rv"] > 0)].copy()
+    result["log_rv"] = np.log(result["rv"])
+    return result[COLUMNS]
 
 
 def build_daily_dataset(
     paths: Iterable[str | pathlib.Path],
     *,
-    frequency: str = "5min",
+    frequency: str = SAMPLING_FREQUENCY,
     min_session_hours: float = MIN_SESSION_HOURS,
 ) -> pd.DataFrame:
     """Build daily RV while reading tick chunks one at a time, in time order.
@@ -131,10 +138,8 @@ def build_daily_dataset(
     if not final_summary.empty:
         summaries.append(final_summary)
 
-    rv_name = f"rv_{frequency}"
-    columns = ["date", rv_name, "log_rv", "observation_count"]
     if not summaries:
-        return pd.DataFrame(columns=columns)
+        return pd.DataFrame(columns=COLUMNS)
 
     result = pd.concat(summaries, ignore_index=True)
     # Overlapping source chunks can produce the same session twice. Prefer the
@@ -142,7 +147,7 @@ def build_daily_dataset(
     # only the latter portion of an otherwise complete session.
     result = result.sort_values(["date", "observation_count"])
     result = result.drop_duplicates("date", keep="last").sort_values("date")
-    result = result.reset_index(drop=True)[columns]
+    result = result.reset_index(drop=True)[COLUMNS]
     if first_tick is not None and last_tick is not None and not result.empty:
         first_open, _ = session_window(result["date"].iloc[0])
         _, last_close = session_window(result["date"].iloc[-1])

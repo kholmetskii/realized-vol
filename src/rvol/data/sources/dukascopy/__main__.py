@@ -8,9 +8,18 @@ import pathlib
 
 import pandas as pd
 
-from rvol.data.sources.dukascopy.download import fetch_range
-from rvol.data.sources.dukascopy.dukascopy_client import DukascopyClient
+from rvol.data.layout import DataLayout
+from rvol.data.sources.dukascopy.download import DEFAULT_WORKERS, fetch_range
+from rvol.data.sources.dukascopy.dukascopy_client import DEFAULT_RETRIES, DukascopyClient
 from rvol.data.sources.dukascopy.raw_hour_cache import RawHourCache
+
+LAYOUT = DataLayout()
+
+#: Failed hours listed by name; the rest are only counted.
+LISTED_FAILURES = 10
+
+#: Basis points per unit: a spread of 1e-4 of the price is one basis point.
+BASIS_POINTS = 1e4
 
 
 def sanity_check(ticks: pd.DataFrame) -> None:
@@ -21,7 +30,7 @@ def sanity_check(ticks: pd.DataFrame) -> None:
     print(f"ticks: {len(ticks):,}")
     print(f"span: {ticks['ts'].iloc[0]} .. {ticks['ts'].iloc[-1]}")
     print(f"crossed quotes (ask < bid): {crossed}")
-    spread = (ticks["ask"] - ticks["bid"]) / ticks["mid"] * 1e4
+    spread = (ticks["ask"] - ticks["bid"]) / ticks["mid"] * BASIS_POINTS
     print(f"spread, bps: median {spread.median():.2f}, 99th pct {spread.quantile(0.99):.2f}")
     print(f"non-positive prices: {(ticks['mid'] <= 0).sum()}")
 
@@ -31,18 +40,28 @@ def main() -> None:
     p.add_argument("symbol", help="e.g. EURUSD")
     p.add_argument("start", help="YYYY-MM-DD")
     p.add_argument("end", help="YYYY-MM-DD")
-    p.add_argument("--out", help="tick output directory (default: data/ticks/SYMBOL)")
+    p.add_argument("--out", help=f"tick output directory (default: {LAYOUT.ticks('SYMBOL')})")
     p.add_argument(
-        "--cache", default="data/raw/dukascopy", help="raw download cache (default: %(default)s)"
+        "--cache",
+        default=str(LAYOUT.raw_cache("dukascopy")),
+        help="raw download cache (default: %(default)s)",
     )
     p.add_argument("--no-cache", action="store_true")
     p.add_argument(
-        "--workers", type=int, default=6, help="parallel downloads (the server throttles each one)"
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help="parallel downloads (default: %(default)s; the server throttles each one)",
     )
-    p.add_argument("--retries", type=int, default=6, help="attempts per hour")
+    p.add_argument(
+        "--retries",
+        type=int,
+        default=DEFAULT_RETRIES,
+        help="attempts per hour (default: %(default)s)",
+    )
     args = p.parse_args()
 
-    out = pathlib.Path(args.out or f"data/ticks/{args.symbol.upper()}")
+    out = pathlib.Path(args.out) if args.out else LAYOUT.ticks(args.symbol)
     out.mkdir(parents=True, exist_ok=True)
     cache = None if args.no_cache else RawHourCache(args.cache)
 
@@ -61,10 +80,10 @@ def main() -> None:
 
     if failed:
         print(f"\nfailed hours: {len(failed)} (re-run to retry them)")
-        for when in failed[:10]:
+        for when in failed[:LISTED_FAILURES]:
             print(f"  {when}")
-        if len(failed) > 10:
-            print(f"  ... and {len(failed) - 10} more")
+        if len(failed) > LISTED_FAILURES:
+            print(f"  ... and {len(failed) - LISTED_FAILURES} more")
 
     dest = out / f"{args.symbol.upper()}_{args.start}_{args.end}.parquet"
     ticks.to_parquet(dest, index=False)

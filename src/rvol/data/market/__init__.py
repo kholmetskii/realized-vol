@@ -3,8 +3,10 @@
 from rvol.data.market.sessions import (
     MIN_SESSION_HOURS,
     SESSION_CLOSE_HOUR,
+    SESSION_LENGTH,
     SESSION_TZ,
     full_sessions,
+    prices_per_session,
     session_labels,
     session_window,
     trading_day,
@@ -13,8 +15,10 @@ from rvol.data.market.sessions import (
 __all__ = [
     "MIN_SESSION_HOURS",
     "SESSION_CLOSE_HOUR",
+    "SESSION_LENGTH",
     "SESSION_TZ",
     "full_sessions",
+    "prices_per_session",
     "session_labels",
     "session_window",
     "trading_day",

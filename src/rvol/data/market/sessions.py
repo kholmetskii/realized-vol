@@ -18,6 +18,21 @@ SESSION_TZ = "America/New_York"
 #: Shorter sessions are holidays or partial weekly opens, not full observations.
 MIN_SESSION_HOURS = 12.0
 
+#: A session runs from one close to the next: 24 hours, except across a DST change.
+SESSION_LENGTH = pd.Timedelta(hours=24)
+
+
+def prices_per_session(frequency: str) -> int:
+    """How many sampled prices a full session holds at ``frequency``.
+
+    One price closes each interval, so a 24-hour session sampled every five
+    minutes holds 288 prices and 287 returns between them.
+    """
+    step = pd.Timedelta(frequency)
+    if step <= pd.Timedelta(0) or SESSION_LENGTH % step != pd.Timedelta(0):
+        raise ValueError("frequency must be positive and divide the session length")
+    return SESSION_LENGTH // step
+
 
 def trading_day(timestamps: pd.DatetimeIndex) -> pd.DatetimeIndex:
     """Return the FX session date for each timestamp.

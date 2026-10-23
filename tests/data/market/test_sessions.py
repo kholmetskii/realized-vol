@@ -3,8 +3,9 @@
 from typing import cast
 
 import pandas as pd
+import pytest
 
-from rvol.data.market import full_sessions, session_window, trading_day
+from rvol.data.market import full_sessions, prices_per_session, session_window, trading_day
 
 
 def test_trading_day_labels_sunday_evening_as_monday():
@@ -69,3 +70,14 @@ def test_session_windows_follow_new_york_wall_clock_across_daylight_saving():
         pd.Timestamp("2024-03-10 21:00", tz="UTC"),
         pd.Timestamp("2024-03-11 21:00", tz="UTC"),
     )
+
+
+@pytest.mark.parametrize(("frequency", "count"), [("5min", 288), ("1h", 24), ("30s", 2880)])
+def test_prices_per_session_divides_a_day_by_the_sampling_step(frequency, count):
+    assert prices_per_session(frequency) == count
+
+
+@pytest.mark.parametrize("frequency", ["0min", "-5min", "7min"])
+def test_prices_per_session_needs_a_step_that_divides_the_session(frequency):
+    with pytest.raises(ValueError, match="divide"):
+        prices_per_session(frequency)

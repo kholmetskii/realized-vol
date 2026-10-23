@@ -1,7 +1,13 @@
 import pandas as pd
 import pytest
 
-from rvol.evaluation import diebold_mariano, forecast_losses, hac_sensitivity, win_rates
+from rvol.evaluation import (
+    default_hac_lags,
+    diebold_mariano,
+    forecast_losses,
+    hac_sensitivity,
+    win_rates,
+)
 from tests.evaluation.test_scoring import sample_forecasts
 from tests.losses import squared_error
 
@@ -39,6 +45,12 @@ def test_each_lag_repeats_the_dm_test_on_existing_losses():
             pivot.baseline, pivot.candidate, hac_lags=int(row.hac_lags)
         )
         assert row.statistic == statistic and row.p_value == p_value
+
+
+def test_default_lags_run_from_zero_to_the_default_for_the_sample_size():
+    table = hac_sensitivity(losses_of(sample_forecasts(80)), "candidate")
+
+    assert table.hac_lags.tolist() == list(range(default_hac_lags(80) + 1))
 
 
 @pytest.mark.parametrize("lags", [(), (0, 0), (-1,), (1.5,), (True,)])

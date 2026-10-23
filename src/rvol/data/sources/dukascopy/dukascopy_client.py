@@ -17,6 +17,9 @@ BASE = "https://datafeed.dukascopy.com/datafeed"
 #: Statuses worth another attempt: throttling and transient server faults.
 RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 
+#: Attempts per hour; with doubling backoff the last waits about half a minute.
+DEFAULT_RETRIES = 6
+
 
 def hour_url(symbol: str, when: dt.datetime) -> str:
     return (
@@ -35,7 +38,7 @@ class DukascopyClient:
 
     def __init__(
         self,
-        retries: int = 6,
+        retries: int = DEFAULT_RETRIES,
         base_delay: float = 1.0,
         timeout: float = 60.0,
         sleep: Callable[[float], None] = time.sleep,

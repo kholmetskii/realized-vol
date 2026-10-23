@@ -16,6 +16,9 @@ from rvol.data.sources.dukascopy.raw_hour_cache import RawHourCache
 #: empty answer for it is not cached as permanent.
 PUBLICATION_DELAY = dt.timedelta(days=1)
 
+#: Parallel downloads: the server throttles each connection, not the total.
+DEFAULT_WORKERS = 6
+
 
 def trading_hours(start: dt.date, end: dt.date) -> list[dt.datetime]:
     """Every hour in [start, end] that the FX market can be open.
@@ -39,7 +42,7 @@ def fetch_range(
     *,
     client: DukascopyClient | None = None,
     cache: RawHourCache | None = None,
-    max_workers: int = 6,
+    max_workers: int = DEFAULT_WORKERS,
     progress: bool = True,
     now: dt.datetime | None = None,
 ) -> tuple[pd.DataFrame, list[dt.datetime]]:

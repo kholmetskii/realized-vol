@@ -49,27 +49,32 @@ python -m rvol.data.sources.dukascopy EURUSD 2023-01-01 2023-03-31
 Run the comparison:
 
 ```python
-from datetime import date
-from pathlib import Path
-
 from rvol import experiment
+from rvol.data.layout import DataLayout
 from rvol.data.volatility import build_daily_dataset
 
-daily = build_daily_dataset(sorted(Path("data/ticks/EURUSD").glob("*.parquet")))
+daily = build_daily_dataset(sorted(DataLayout().ticks("EURUSD").glob("*.parquet")))
 forecasts = experiment.forecast(
-    experiment.prepare(daily),
-    experiment.benchmark_models(),
-    start=date(2024, 10, 1),  # Oct–Dec 2024 only calibrates smearing
-    end=date(2026, 9, 30),
-    asset="EURUSD",
+    experiment.prepare(daily), experiment.benchmark_models(), asset="EURUSD"
 )
-comparison = experiment.compare(forecasts, evaluation_start=date(2025, 1, 1))
-print(experiment.results_table(comparison))
+print(experiment.results_table(experiment.compare(forecasts)))
 ```
+
+The study design (forecast and evaluation dates, the minimum training sample,
+the candidate model) is a set of named constants at the top of
+`rvol/experiment.py`; every function uses them as defaults.
 
 The full study, with figures and explanations, is one notebook per asset:
 [`notebooks/01_eurusd.ipynb`](notebooks/01_eurusd.ipynb). Install its extras with
-`pip install -e ".[notebooks]"`.
+`pip install -e ".[notebooks]"`, then rerun it from the terminal with
+
+```bash
+jupyter nbconvert --to notebook --execute --inplace notebooks/01_eurusd.ipynb
+```
+
+Its figures come from `notebooks/_plots.py`, and every number in its text is
+printed by a code cell, so a rerun on new data leaves no stale figure. For
+another pair, copy it and change `ASSET`; only the commentary is written by hand.
 
 ## Extending
 

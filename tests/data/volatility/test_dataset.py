@@ -31,10 +31,10 @@ def test_sessions_split_across_files_give_the_expected_rv(tmp_path):
     result = build_daily_dataset([first, second], frequency="5min")
 
     # 288 five-minute prices, 5 minutes apart in log price: 287 returns of 5 * STEP.
-    assert list(result.columns) == ["date", "rv_5min", "log_rv", "observation_count"]
+    assert list(result.columns) == ["date", "rv", "log_rv", "observation_count"]
     assert list(result["date"]) == [pd.Timestamp("2024-01-16"), pd.Timestamp("2024-01-17")]
     assert list(result["observation_count"]) == [288, 288]
-    np.testing.assert_allclose(result["rv_5min"], 287 * (5 * STEP) ** 2)
+    np.testing.assert_allclose(result["rv"], 287 * (5 * STEP) ** 2)
     assert np.isclose(cast(float, result.loc[0, "log_rv"]), np.log(287 * (5 * STEP) ** 2))
 
 

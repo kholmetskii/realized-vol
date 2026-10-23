@@ -15,7 +15,8 @@ PACKAGE_DEPENDENCIES = {
     "data": set(),
     "data.preparation": {"data.preparation"},
     "data.sources": set(),
-    "data.sources.dukascopy": {"data.sources.dukascopy"},
+    # The command line writes where the shared data layout says.
+    "data.sources.dukascopy": {"data.sources.dukascopy", "data"},
     "data.market": {"data.market"},
     "data.volatility": {"data.volatility", "data.market", "estimators"},
     "estimators": {"estimators", "estimators.variance"},

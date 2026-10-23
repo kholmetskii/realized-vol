@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator
 import numpy as np
 import pandas as pd
 
-from rvol.evaluation.diebold_mariano import diebold_mariano
+from rvol.evaluation.diebold_mariano import default_hac_lags, diebold_mariano
 
 
 def win_rates(
@@ -45,15 +45,16 @@ def win_rates(
 def hac_sensitivity(
     losses: pd.DataFrame,
     candidate: str,
-    lags: Iterable[int] = range(6),
+    lags: Iterable[int] | None = None,
 ) -> pd.DataFrame:
     """The one-sided DM test of the candidate against every baseline, for each HAC lag.
 
     A verdict that changes with the lag count depends on the Newey-West
-    correction rather than on the forecasts.
+    correction rather than on the forecasts. By default the lags run from 0 to
+    the default lag count for each pair's sample size.
     """
-    selected = tuple(lags)
-    if (
+    selected = None if lags is None else tuple(lags)
+    if selected is not None and (
         not selected
         or len(set(selected)) != len(selected)
         or any(isinstance(lag, bool) or not isinstance(lag, int) or lag < 0 for lag in selected)
@@ -61,7 +62,8 @@ def hac_sensitivity(
         raise ValueError("lags must be non-empty unique non-negative integers")
     rows = []
     for baseline, benchmark, proposed in _paired_losses(losses, candidate):
-        for lag in selected:
+        pair_lags = range(default_hac_lags(len(benchmark)) + 1) if selected is None else selected
+        for lag in pair_lags:
             statistic, p_value = diebold_mariano(benchmark, proposed, hac_lags=lag)
             rows.append(
                 {
