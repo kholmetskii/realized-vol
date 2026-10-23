@@ -16,10 +16,6 @@ class RawHourCache:
     def __init__(self, root: str | pathlib.Path) -> None:
         self._root = pathlib.Path(root)
 
-    @property
-    def root(self) -> pathlib.Path:
-        return self._root
-
     def read(self, symbol: str, when: dt.datetime) -> tuple[bool, bytes | None]:
         """Look one hour up. Returns (hit, body)."""
         body_path, marker = self._paths(symbol, when)

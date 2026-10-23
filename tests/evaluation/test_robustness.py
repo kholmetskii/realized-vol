@@ -68,3 +68,14 @@ def test_every_other_model_is_a_baseline():
     losses = losses_of(pd.concat([forecasts, third], ignore_index=True))
 
     assert win_rates(losses, "candidate").baseline_model.tolist() == ["baseline", "other"]
+
+
+@pytest.mark.parametrize("scale", [1.0, 1e-10])
+def test_win_rates_do_not_depend_on_the_losses_scale(scale):
+    losses = losses_of(sample_forecasts(80))
+    losses["loss"] *= scale
+
+    row = win_rates(losses, "candidate").iloc[0]
+
+    assert row.candidate_wins == 80
+    assert row.ties == 0

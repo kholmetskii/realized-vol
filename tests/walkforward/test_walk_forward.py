@@ -12,13 +12,13 @@ from tests.forecasting_helpers import (
     benchmark_models,
     daily_sample,
     har_features,
-    prepared_variance,
+    prepared_log_rv,
     reference_predictions,
 )
 
 
 def test_forecasts_match_a_slow_rebuild_from_date_filters():
-    data = prepared_variance()
+    data = prepared_log_rv()
     unchanged = data.copy(deep=True)
     for model in benchmark_models():
         actual = walk_forward(data, model, min_train_size=15)
@@ -51,7 +51,7 @@ def test_changing_future_data_cannot_change_earlier_forecasts():
 
 
 def test_training_uses_exactly_the_outcomes_observed_at_each_origin():
-    data = prepared_variance(feature_columns=("log_rv_daily",))
+    data = prepared_log_rv(feature_columns=("log_rv_daily",))
 
     ar1 = ForecastModel("AR1", LinearRegression(), ("log_rv_daily",))
     forecasts = walk_forward(data, ar1, min_train_size=10)
@@ -62,7 +62,7 @@ def test_training_uses_exactly_the_outcomes_observed_at_each_origin():
 
 
 def test_bounds_select_target_dates_without_changing_forecasts():
-    data = prepared_variance()
+    data = prepared_log_rv()
     model = ForecastModel("HAR", LinearRegression(), ALL_FEATURES)
     full = walk_forward(data, model, min_train_size=15)
     start, end = full.target_date.iloc[7].date(), full.target_date.iloc[-4].date()
@@ -75,7 +75,7 @@ def test_bounds_select_target_dates_without_changing_forecasts():
 
 def test_no_forecast_period_returns_an_empty_table_with_the_forecast_columns():
     result = walk_forward(
-        prepared_variance(),
+        prepared_log_rv(),
         ForecastModel("historical_mean", LinearRegression()),
         min_train_size=15,
         start=date(2050, 1, 1),
@@ -87,7 +87,7 @@ def test_no_forecast_period_returns_an_empty_table_with_the_forecast_columns():
 
 def test_rows_are_labelled_with_the_model_and_series():
     ewma = ForecastModel("EWMA", ExponentialSmoothing(decay=0.94))
-    forecasts = walk_forward(prepared_variance(), ewma, min_train_size=15, series="EURUSD")
+    forecasts = walk_forward(prepared_log_rv(), ewma, min_train_size=15, series="EURUSD")
 
     assert set(forecasts.model) == {"EWMA"}
     assert set(forecasts.series) == {"EURUSD"}
@@ -155,7 +155,7 @@ def test_a_rule_cannot_corrupt_later_training_by_mutating_its_arrays():
 
 
 def test_reusing_a_model_object_gives_identical_forecasts():
-    data = prepared_variance()
+    data = prepared_log_rv()
     model = ForecastModel("EWMA", ExponentialSmoothing(decay=0.8))
     first = walk_forward(data, model, min_train_size=5)
     shifted = data.assign(target=data.target + 100)
@@ -168,7 +168,7 @@ def test_reusing_a_model_object_gives_identical_forecasts():
     "corruption", ["missing_column", "origin_not_before_target", "duplicate", "missing_date", "inf"]
 )
 def test_invalid_data_is_rejected(corruption):
-    data = prepared_variance(feature_columns=("log_rv_daily",))
+    data = prepared_log_rv(feature_columns=("log_rv_daily",))
     if corruption == "missing_column":
         data = data.drop(columns="target")
     elif corruption == "origin_not_before_target":
@@ -188,7 +188,7 @@ def test_invalid_data_is_rejected(corruption):
 def test_min_train_size_must_be_a_positive_integer(size):
     with pytest.raises(ValueError, match="min_train_size"):
         mean = ForecastModel("historical_mean", LinearRegression())
-        walk_forward(prepared_variance(), mean, min_train_size=size)
+        walk_forward(prepared_log_rv(), mean, min_train_size=size)
 
 
 def test_non_finite_predictions_are_rejected():
@@ -200,4 +200,4 @@ def test_non_finite_predictions_are_rejected():
             return np.array([np.nan])
 
     with pytest.raises(ValueError, match="broken"):
-        walk_forward(prepared_variance(), ForecastModel("broken", Broken()), min_train_size=15)
+        walk_forward(prepared_log_rv(), ForecastModel("broken", Broken()), min_train_size=15)

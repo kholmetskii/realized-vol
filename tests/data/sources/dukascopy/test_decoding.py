@@ -8,11 +8,13 @@ from tests.data.sources.dukascopy.fakes import HOUR, make_bi5
 
 
 def test_decode_roundtrip():
-    raw = make_bi5([
-        (0, 109123, 109118, 1.5, 2.0),
-        (1500, 109125, 109120, 0.7, 0.9),
-        (3_599_999, 109130, 109124, 3.0, 1.1),
-    ])
+    raw = make_bi5(
+        [
+            (0, 109123, 109118, 1.5, 2.0),
+            (1500, 109125, 109120, 0.7, 0.9),
+            (3_599_999, 109130, 109124, 3.0, 1.1),
+        ]
+    )
     df = decode_hour(raw, HOUR, point_divider("EURUSD"))
 
     assert len(df) == 3

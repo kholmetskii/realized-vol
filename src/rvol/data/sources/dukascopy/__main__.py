@@ -22,8 +22,7 @@ def sanity_check(ticks: pd.DataFrame) -> None:
     print(f"span: {ticks['ts'].iloc[0]} .. {ticks['ts'].iloc[-1]}")
     print(f"crossed quotes (ask < bid): {crossed}")
     spread = (ticks["ask"] - ticks["bid"]) / ticks["mid"] * 1e4
-    print(f"spread, bps: median {spread.median():.2f}, "
-          f"99th pct {spread.quantile(0.99):.2f}")
+    print(f"spread, bps: median {spread.median():.2f}, 99th pct {spread.quantile(0.99):.2f}")
     print(f"non-positive prices: {(ticks['mid'] <= 0).sum()}")
 
 
@@ -37,8 +36,9 @@ def main() -> None:
         "--cache", default="data/raw/dukascopy", help="raw download cache (default: %(default)s)"
     )
     p.add_argument("--no-cache", action="store_true")
-    p.add_argument("--workers", type=int, default=6,
-                   help="parallel downloads (the server throttles each one)")
+    p.add_argument(
+        "--workers", type=int, default=6, help="parallel downloads (the server throttles each one)"
+    )
     p.add_argument("--retries", type=int, default=6, help="attempts per hour")
     args = p.parse_args()
 

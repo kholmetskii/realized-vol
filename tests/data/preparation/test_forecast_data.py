@@ -62,7 +62,7 @@ def test_sparse_reordered_features_keep_targets_on_the_full_session_timeline():
     pd.testing.assert_frame_equal(targets, original_targets)
 
 
-def test_independent_plain_builders_need_no_specification_or_shared_base_class():
+def test_any_feature_table_keyed_by_origin_can_be_prepared():
     daily = daily_sample()
     daily["other_outcome"] = np.arange(len(daily)) / 10 - 5
     features = pd.DataFrame({"origin_date": daily.date, "input": daily.log_rv}).iloc[::2]
@@ -184,7 +184,7 @@ def test_observation_preparation_rejects_missing_nullable_values():
         ["invalid", "2", "3"],
     ],
 )
-def test_preparation_rejects_invalid_features_before_a_dataset_can_be_saved(values):
+def test_preparation_rejects_invalid_feature_values(values):
     observations = pd.DataFrame(
         {"date": pd.date_range("2026-10-01", periods=3), "value": [1.0, 2.0, 3.0]}
     )

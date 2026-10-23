@@ -4,7 +4,7 @@ from typing import cast
 
 import pandas as pd
 
-from rvol.data.market import full_sessions, trading_day
+from rvol.data.market import full_sessions, session_window, trading_day
 
 
 def test_trading_day_labels_sunday_evening_as_monday():
@@ -42,7 +42,10 @@ def test_naive_timestamps_are_read_as_utc():
 
 
 def test_short_sessions_are_dropped():
-    """A two-hour Sunday is not a day; keeping it would bias every average."""
+    """A two-hour fragment, such as a holiday close, is not a day.
+
+    Keeping it would bias every average.
+    """
     # 22:00 UTC is the winter open: 17:00 New York.
     full = pd.date_range("2024-01-15 22:00", periods=24, freq="1h", tz="UTC")
     short = pd.date_range("2024-01-19 22:00", periods=2, freq="1h", tz="UTC")
@@ -51,3 +54,18 @@ def test_short_sessions_are_dropped():
     kept = full_sessions(s)
     assert len(kept) == len(full)
     assert set(trading_day(cast(pd.DatetimeIndex, kept.index))) == {pd.Timestamp("2024-01-16")}
+
+
+def test_session_windows_follow_new_york_wall_clock_across_daylight_saving():
+    """US clocks moved forward on Sunday 10 March 2024."""
+    friday = session_window(pd.Timestamp("2024-03-08"))
+    monday = session_window(pd.Timestamp("2024-03-11"))
+
+    assert friday == (
+        pd.Timestamp("2024-03-07 22:00", tz="UTC"),
+        pd.Timestamp("2024-03-08 22:00", tz="UTC"),
+    )
+    assert monday == (
+        pd.Timestamp("2024-03-10 21:00", tz="UTC"),
+        pd.Timestamp("2024-03-11 21:00", tz="UTC"),
+    )

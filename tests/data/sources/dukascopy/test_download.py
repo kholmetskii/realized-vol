@@ -22,7 +22,11 @@ def test_cached_hours_are_not_downloaded_again(tmp_path, monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     ticks, failed = fetch_range(
-        "EURUSD", HOUR.date(), HOUR.date(), cache=cache, progress=False,
+        "EURUSD",
+        HOUR.date(),
+        HOUR.date(),
+        cache=cache,
+        progress=False,
     )
     assert failed == []
     assert len(ticks) == 1
@@ -36,14 +40,19 @@ def test_one_bad_hour_does_not_lose_the_rest(tmp_path, monkeypatch):
             cache.write("EURUSD", HOUR.replace(hour=hour), good)
 
     monkeypatch.setattr(
-        urllib.request, "urlopen",
+        urllib.request,
+        "urlopen",
         lambda req, timeout=None: (_ for _ in ()).throw(http_error(503)),
     )
 
     ticks, failed = fetch_range(
-        "EURUSD", HOUR.date(), HOUR.date(),
+        "EURUSD",
+        HOUR.date(),
+        HOUR.date(),
         client=DukascopyClient(retries=2, sleep=lambda _: None),
-        cache=cache, max_workers=2, progress=False,
+        cache=cache,
+        max_workers=2,
+        progress=False,
     )
     assert failed == [HOUR]
     assert len(ticks) == 23
@@ -56,3 +65,20 @@ def test_saturday_is_skipped_but_sunday_is_not():
     hours = trading_hours(saturday, sunday)
     assert {h.date() for h in hours} == {sunday}
     assert len(hours) == 24
+
+
+def test_empty_hours_are_cached_only_once_they_are_settled(tmp_path, monkeypatch):
+    cache = RawHourCache(tmp_path)
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda req, timeout=None: (_ for _ in ()).throw(http_error(404)),
+    )
+    day = HOUR.date()
+    hours = [HOUR.replace(hour=hour) for hour in range(24)]
+
+    fetch_range("EURUSD", day, day, cache=cache, progress=False, now=HOUR.replace(hour=20))
+    assert not any(cache.read("EURUSD", when)[0] for when in hours)
+
+    fetch_range("EURUSD", day, day, cache=cache, progress=False, now=HOUR + dt.timedelta(days=3))
+    assert all(cache.read("EURUSD", when)[0] for when in hours)

@@ -6,6 +6,7 @@ from rvol.data.market.sessions import (
     SESSION_TZ,
     full_sessions,
     session_labels,
+    session_window,
     trading_day,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "SESSION_TZ",
     "full_sessions",
     "session_labels",
+    "session_window",
     "trading_day",
 ]

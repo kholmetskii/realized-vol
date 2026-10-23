@@ -54,7 +54,8 @@ def test_503_is_retried_then_succeeds(monkeypatch):
 
 def test_persistent_failure_raises_fetch_error(monkeypatch):
     monkeypatch.setattr(
-        urllib.request, "urlopen",
+        urllib.request,
+        "urlopen",
         lambda req, timeout=None: (_ for _ in ()).throw(http_error(503)),
     )
     with pytest.raises(FetchError):

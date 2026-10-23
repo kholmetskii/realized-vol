@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TypeAlias
-
 import pandas as pd
 
-SamplingOrigin: TypeAlias = pd.Timestamp | str
 
+def last_tick_sample(prices: pd.Series, frequency: str) -> pd.Series:
+    """Put irregular prices on a regular grid, keeping the last price in each bin.
 
-def last_tick_sample(
-    prices: pd.Series,
-    frequency: str,
-    origin: SamplingOrigin = "start_day",
-) -> pd.Series:
-    """Put irregular prices on a regular grid using the last tick in each bin."""
-    return prices.resample(frequency, origin=origin).last().dropna()
+    Bins are anchored at midnight UTC; empty bins are dropped.
+    """
+    return prices.resample(frequency, origin="start_day").last().dropna()

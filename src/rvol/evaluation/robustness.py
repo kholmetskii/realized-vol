@@ -15,12 +15,13 @@ def win_rates(
     candidate: str,
     *,
     tie_rtol: float = 1e-5,
-    tie_atol: float = 1e-8,
+    tie_atol: float = 0.0,
 ) -> pd.DataFrame:
     """Share of target dates on which the candidate's loss is strictly lower.
 
     One row per baseline (every other model). Losses equal within
-    ``np.isclose(rtol, atol)`` count as ties, not wins.
+    ``np.isclose(rtol, atol)`` count as ties, not wins. The absolute tolerance
+    defaults to zero because the losses' scale is unknown here.
     """
     if any(not np.isfinite(value) or value < 0 for value in (tie_rtol, tie_atol)):
         raise ValueError("tie tolerances must be finite and non-negative")

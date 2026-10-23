@@ -38,7 +38,8 @@ def benchmark_models() -> tuple[ForecastModel, ...]:
     return (
         ForecastModel("historical_mean", LinearRegression()),  # no regressors: the mean
         ForecastModel("naive", ExponentialSmoothing(decay=0.0)),  # tomorrow equals today
-        ForecastModel("EWMA", ExponentialSmoothing(decay=0.94)),  # RiskMetrics daily decay
+        # 0.94 is RiskMetrics' daily decay for squared returns; here it smooths log RV.
+        ForecastModel("EWMA", ExponentialSmoothing(decay=0.94)),
         ForecastModel("AR1", LinearRegression(), ("log_rv_daily",)),
         ForecastModel("HAR", LinearRegression(), HAR_FEATURES),
     )

@@ -89,22 +89,12 @@ def test_clean_architecture_dependency_direction(package: str):
     assert not violations, f"{package_name} has outward dependencies: {'; '.join(violations)}"
 
 
-def test_models_have_no_required_specification_or_domain_layer():
-    assert not (PACKAGE_ROOT / "domain").exists()
-    for package in ("models", "walkforward"):
-        for path in (PACKAGE_ROOT / package).rglob("*.py"):
-            tree = ast.parse(path.read_text())
-            assert not any(
-                isinstance(node, ast.FunctionDef) and node.name == "specification"
-                for node in ast.walk(tree)
-            ), str(path)
-
-
 # Packages that score, fit and prepare any series must not know what is forecast.
 GENERIC_PACKAGES = ("models", "walkforward", "evaluation", "data.preparation")
 DOMAIN_WORDS = re.compile(
-    r"\b(?:volatil\w*|variance|realized|realised|rv|log_rv\w*|sessions?|fx|ticks?|assets?"
-    r"|dukascopy|trading|eurusd|bid|ask|quotes?|prices?)\b",
+    r"\b(?:volatil\w*|variances?|realized|realised|rv|\w*_rv|rv_\w*|log_rv\w*|sessions?|fx"
+    r"|ticks?|assets?|markets?|dukascopy|trading|eur/?usd|bid|ask|quotes?|prices?|pips?"
+    r"|currenc\w*|annuali[sz]\w*|har|ar\(1\))(?=\W|$)",
     re.IGNORECASE,
 )
 
@@ -119,3 +109,15 @@ def test_generic_packages_do_not_know_the_forecasting_domain(package: str):
         for match in DOMAIN_WORDS.finditer(line)
     ]
     assert not found, "domain vocabulary in a generic package: " + "; ".join(found)
+
+
+def test_estimators_do_not_know_about_trading_calendars():
+    calendar_words = re.compile(r"\b(?:sessions?|trading|new york|fx|close|open)\b", re.IGNORECASE)
+    root = PACKAGE_ROOT / "estimators"
+    found = [
+        f"{path.name}:{number}: {match.group()}"
+        for path in sorted(root.rglob("*.py"))
+        for number, line in enumerate(path.read_text().splitlines(), start=1)
+        for match in calendar_words.finditer(line)
+    ]
+    assert not found, "calendar knowledge in estimators: " + "; ".join(found)

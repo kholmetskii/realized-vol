@@ -11,8 +11,8 @@ from rvol.models.forecast_rule import ForecastRule
 class ForecastModel:
     """The triple that defines a model: its name, its rule and its regressors.
 
-    Two models with the same rule differ only in their regressors; for example
-    AR(1) and HAR are both least-squares regressions.
+    Two models with the same rule differ only in their regressors, for example
+    a regression on one lag and a regression on three trailing means.
     """
 
     name: str

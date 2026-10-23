@@ -90,7 +90,7 @@ src/rvol/
 ├── evaluation/    losses, Diebold–Mariano test, robustness checks
 └── experiment.py  the full comparison
 notebooks/         one study per asset
-tests/             mirrors src/rvol/
+tests/             unit and integration tests, laid out like src/rvol/
 ```
 
 One public class per file (`LinearRegression` → `linear_regression.py`); each package exports
@@ -103,7 +103,11 @@ Domain code lives in `data.sources`, `data.market`, `data.volatility` and
 
 ## Limitations
 
-- AR(1) is nested in HAR, so its DM test is conservative (Clark & West, 2007).
+- AR(1) and the historical mean are nested in HAR, so their DM tests are
+  conservative (Clark & West, 2007).
+- Each session's RV sums the returns between its own 5-minute prices, so the one
+  5-minute return spanning 17:00 New York, the boundary between two sessions, is
+  left out (on average 0.2% of RV).
 - Sessions follow the FX convention, so exchange-traded assets need their own
   session rules.
 

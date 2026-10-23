@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from rvol.estimators import sampled_realized_variance
 
@@ -11,7 +10,6 @@ N_DAYS = 20
 PER_DAY = 24 * 60 * 60  # one tick per second
 
 
-@pytest.mark.slow
 def test_five_minute_rv_recovers_the_true_volatility():
     """A continuous path ticking every second, split into 24-hour periods."""
     rng = np.random.default_rng(0)

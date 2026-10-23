@@ -12,6 +12,10 @@ from rvol.data.sources.dukascopy.dukascopy_client import DukascopyClient
 from rvol.data.sources.dukascopy.exceptions import FetchError
 from rvol.data.sources.dukascopy.raw_hour_cache import RawHourCache
 
+#: An hour this recent may be empty only because it is not published yet, so an
+#: empty answer for it is not cached as permanent.
+PUBLICATION_DELAY = dt.timedelta(days=1)
+
 
 def trading_hours(start: dt.date, end: dt.date) -> list[dt.datetime]:
     """Every hour in [start, end] that the FX market can be open.
@@ -23,9 +27,7 @@ def trading_hours(start: dt.date, end: dt.date) -> list[dt.datetime]:
     day = start
     while day <= end:
         if day.weekday() != 5:
-            hours.extend(
-                dt.datetime(day.year, day.month, day.day, h) for h in range(24)
-            )
+            hours.extend(dt.datetime(day.year, day.month, day.day, h) for h in range(24))
         day += dt.timedelta(days=1)
     return hours
 
@@ -39,6 +41,7 @@ def fetch_range(
     cache: RawHourCache | None = None,
     max_workers: int = 6,
     progress: bool = True,
+    now: dt.datetime | None = None,
 ) -> tuple[pd.DataFrame, list[dt.datetime]]:
     """Fetch every hour in [start, end] inclusive.
 
@@ -47,11 +50,15 @@ def fetch_range(
     are collected and returned rather than raised, so one bad patch does not
     discard the rest of the run; re-running picks them up from the cache.
 
+    An empty hour ending within ``PUBLICATION_DELAY`` of ``now`` (UTC, default
+    the current time) is not cached, so a later run asks for it again.
+
     Returns (ticks, failed_hours).
     """
     downloader = DukascopyClient() if client is None else client
     divisor = point_divider(symbol)
     hours = trading_hours(start, end)
+    current = dt.datetime.now(dt.UTC).replace(tzinfo=None) if now is None else now
     frames: dict[dt.datetime, pd.DataFrame] = {}
     failed: list[dt.datetime] = []
 
@@ -61,7 +68,8 @@ def fetch_range(
             if hit:
                 return when, raw
         raw = downloader.fetch_hour(symbol, when)
-        if cache is not None:
+        settled = when + dt.timedelta(hours=1) + PUBLICATION_DELAY <= current
+        if cache is not None and (raw or settled):
             cache.write(symbol, when, raw)
         return when, raw
 

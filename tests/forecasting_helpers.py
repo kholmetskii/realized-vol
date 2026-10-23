@@ -5,12 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from rvol import experiment
 from rvol.data.preparation import (
     TrailingMeanFeatures,
     build_next_observation_targets,
     prepare_forecast_data,
 )
-from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
+from rvol.models import ForecastModel
 
 
 def daily_sample(n: int = 85) -> pd.DataFrame:
@@ -19,8 +20,9 @@ def daily_sample(n: int = 85) -> pd.DataFrame:
     return pd.DataFrame({"date": pd.bdate_range("2023-01-02", periods=n), "log_rv": values})
 
 
-WINDOWS = {"log_rv_daily": 1, "log_rv_weekly": 5, "log_rv_monthly": 22}
-ALL_FEATURES = tuple(WINDOWS)
+WINDOWS = experiment.HAR_WINDOWS
+ALL_FEATURES = experiment.HAR_FEATURES
+benchmark_models = experiment.benchmark_models
 
 
 def har_features(names: tuple[str, ...] = ALL_FEATURES) -> TrailingMeanFeatures:
@@ -30,17 +32,7 @@ def har_features(names: tuple[str, ...] = ALL_FEATURES) -> TrailingMeanFeatures:
     )
 
 
-def benchmark_models() -> tuple[ForecastModel, ...]:
-    return (
-        ForecastModel("historical_mean", LinearRegression()),
-        ForecastModel("naive", ExponentialSmoothing(decay=0.0)),
-        ForecastModel("EWMA", ExponentialSmoothing(decay=0.94)),
-        ForecastModel("AR1", LinearRegression(), ("log_rv_daily",)),
-        ForecastModel("HAR", LinearRegression(), ALL_FEATURES),
-    )
-
-
-def prepared_variance(
+def prepared_log_rv(
     *,
     n: int = 85,
     feature_columns: tuple[str, ...] = ALL_FEATURES,

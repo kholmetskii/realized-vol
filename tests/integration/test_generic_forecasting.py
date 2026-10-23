@@ -6,7 +6,7 @@ from rvol.data.preparation import build_next_observation_targets, prepare_foreca
 from rvol.evaluation import forecast_losses
 from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
 from rvol.walkforward import walk_forward
-from tests.forecasting_helpers import benchmark_models, lag_features, prepared_variance
+from tests.forecasting_helpers import benchmark_models, lag_features, prepared_log_rv
 from tests.losses import absolute_error, squared_error
 
 
@@ -56,7 +56,7 @@ def test_naive_forecasts_and_losses_apply_no_implicit_transformations():
 
 def test_each_model_waits_only_for_the_inputs_it_uses():
     for model in benchmark_models():
-        data = prepared_variance(n=50, feature_columns=model.regressors)
+        data = prepared_log_rv(n=50, feature_columns=model.regressors)
 
         forecasts = walk_forward(data, model, min_train_size=5)
 

@@ -4,28 +4,21 @@ import pytest
 from rvol.estimators import realized_variance
 
 
+def test_realized_variance_sums_squared_log_returns():
+    # log prices 0, 1, ..., 5: five returns of 1
+    assert realized_variance(np.exp(np.arange(6, dtype="float64"))) == pytest.approx(5.0)
+
+
+def test_realized_variance_is_invariant_to_the_price_unit():
+    prices = np.array([1.10, 1.12, 1.09, 1.11])
+
+    assert realized_variance(100 * prices) == pytest.approx(realized_variance(prices))
+
+
 @pytest.mark.parametrize(
-    "estimator, options, message",
-    [
-        (realized_variance, {"step": True}, "step"),
-        (realized_variance, {"step": 1.5}, "step"),
-        (realized_variance, {"step": 0}, "step"),
-        (realized_variance, {"step": np.bool_(True)}, "step"),
-        (realized_variance, {"offset": True}, "offset"),
-        (realized_variance, {"offset": 0.5}, "offset"),
-        (realized_variance, {"offset": -1}, "offset"),
-        (realized_variance, {"step": 2, "offset": 2}, "offset"),
-    ],
+    "prices",
+    [np.array([1.0]), np.ones((2, 2)), np.array([1.0, 0.0]), np.array([1.0, np.nan])],
 )
-def test_realized_variance_rejects_invalid_sampling_parameters(estimator, options, message):
-    prices = np.exp(np.arange(6, dtype="float64"))
-
-    with pytest.raises(ValueError, match=message):
-        estimator(prices, **options)
-
-
-@pytest.mark.parametrize("integer", [int, np.int32, np.int64])
-def test_realized_variance_accepts_python_and_numpy_integer_grids(integer):
-    prices = np.exp(np.arange(6, dtype="float64"))
-
-    assert realized_variance(prices, step=integer(2), offset=integer(0)) == pytest.approx(8.0)
+def test_invalid_price_paths_are_rejected(prices):
+    with pytest.raises(ValueError, match="prices"):
+        realized_variance(prices)

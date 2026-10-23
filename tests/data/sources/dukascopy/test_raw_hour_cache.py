@@ -24,4 +24,3 @@ def test_cache_files_live_under_the_symbol_and_hour(tmp_path):
 
     assert (tmp_path / "EURUSD/2024/01/15/14h_ticks.bi5").read_bytes() == b"body"
     assert (tmp_path / "EURUSD/2024/01/15/15h_ticks.empty").is_file()
-    assert cache.root == tmp_path

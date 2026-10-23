@@ -56,9 +56,11 @@ def diebold_mariano(
         long_run_variance += 2.0 * weight * covariance
     long_run_variance = max(long_run_variance, 0.0)
 
-    tolerance = np.finfo("float64").eps * max(1.0, abs(mean_difference))
+    # Degenerate cases are judged on the losses' own scale, so multiplying every
+    # loss by a constant never changes the result.
+    tolerance = np.finfo("float64").eps * float(differential @ differential / n_obs)
     if long_run_variance <= tolerance:
-        if abs(mean_difference) <= tolerance:
+        if abs(mean_difference) <= np.sqrt(tolerance):
             statistic, p_value = 0.0, 0.5
         elif mean_difference > 0:
             statistic, p_value = float("inf"), 0.0

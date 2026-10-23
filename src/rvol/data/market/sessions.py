@@ -19,19 +19,30 @@ SESSION_TZ = "America/New_York"
 MIN_SESSION_HOURS = 12.0
 
 
-def trading_day(
-    timestamps: pd.DatetimeIndex,
-    close_hour: int = SESSION_CLOSE_HOUR,
-    timezone: str = SESSION_TZ,
-) -> pd.DatetimeIndex:
+def trading_day(timestamps: pd.DatetimeIndex) -> pd.DatetimeIndex:
     """Return the FX session date for each timestamp.
 
     A session is named after the local date on which it closes.  Naive input
     timestamps are interpreted as UTC, which is also the Dukascopy convention.
     """
     index = timestamps.tz_localize("UTC") if timestamps.tz is None else timestamps
-    shifted = index.tz_convert(timezone) + pd.Timedelta(hours=24 - close_hour)
+    shifted = index.tz_convert(SESSION_TZ) + pd.Timedelta(hours=24 - SESSION_CLOSE_HOUR)
     return pd.DatetimeIndex(shifted.normalize().tz_localize(None))
+
+
+def session_window(day: pd.Timestamp) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """UTC open and close of the session named ``day``.
+
+    It opens at 17:00 New York on the previous calendar day and closes at 17:00
+    New York on ``day``, both in local wall-clock time across DST changes.
+    """
+    close_day = pd.Timestamp(day).normalize()
+    open_day = close_day - pd.Timedelta(days=1)
+    open_, close = (
+        pd.Timestamp(d.year, d.month, d.day, SESSION_CLOSE_HOUR).tz_localize(SESSION_TZ)
+        for d in (open_day, close_day)
+    )
+    return open_.tz_convert("UTC"), close.tz_convert("UTC")
 
 
 def session_labels(prices: pd.Series) -> pd.Series:
@@ -47,10 +58,7 @@ def full_sessions(
     """Keep sessions whose first-to-last observation span is long enough."""
     labels = session_labels(prices)
     span_hours = prices.groupby(labels).apply(
-        lambda session: (
-            session.index[-1] - session.index[0]
-        ).total_seconds()
-        / 3600.0
+        lambda session: (session.index[-1] - session.index[0]).total_seconds() / 3600.0
     )
     retained = set(span_hours[span_hours >= min_hours].index)
     return prices[labels.isin(retained)]

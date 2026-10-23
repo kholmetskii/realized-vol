@@ -2,8 +2,8 @@
 
 A rule says how a forecast is computed and estimated: LinearRegression (least
 squares, optionally ridge-penalized) or ExponentialSmoothing (fixed weights). A
-ForecastModel names a rule applied to chosen regressors; the historical mean,
-AR(1) and HAR are all LinearRegression with different regressors.
+ForecastModel names a rule applied to chosen regressors, so models that share a
+rule differ only in their regressors.
 """
 
 from rvol.models.arrays import FloatArray
