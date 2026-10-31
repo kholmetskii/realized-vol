@@ -5,6 +5,7 @@ import pytest
 from rvol.data.preparation import (
     TrailingMeanFeatures,
     build_next_observation_targets,
+    join_features,
     prepare_forecast_data,
 )
 from rvol.models import ForecastModel, LinearRegression
@@ -13,18 +14,17 @@ from rvol.walkforward import walk_forward
 
 def daily_sample(n: int = 16) -> pd.DataFrame:
     dates = pd.bdate_range("2024-01-02", periods=n + 1).delete(min(6, n))
-    return pd.DataFrame({"date": dates, "log_rv": np.log(np.arange(1, n + 1))})
+    return pd.DataFrame({"date": dates, "value": np.log(np.arange(1, n + 1))})
 
 
 def short_windows() -> TrailingMeanFeatures:
-    windows = {"log_rv_daily": 1, "log_rv_weekly": 2, "log_rv_monthly": 4}
-    return TrailingMeanFeatures(windows, value_col="log_rv")
+    return TrailingMeanFeatures("value", (1, 2, 4))
 
 
 def test_targets_label_the_full_timeline_without_feature_warmup():
     daily = daily_sample().sample(frac=1, random_state=42)
     unchanged = daily.copy(deep=True)
-    targets = build_next_observation_targets(daily, value_col="log_rv")
+    targets = build_next_observation_targets(daily, value_col="value")
     ordered = daily.sort_values("date").reset_index(drop=True)
 
     assert len(targets) == len(daily)
@@ -36,7 +36,7 @@ def test_targets_label_the_full_timeline_without_feature_warmup():
             assert pd.isna(row.target_date) and pd.isna(row.target)
             continue
         assert row.target_date == ordered["date"].iloc[index + 1]
-        assert row.target == ordered["log_rv"].iloc[index + 1]
+        assert row.target == ordered["value"].iloc[index + 1]
     pd.testing.assert_frame_equal(daily, unchanged)
 
 
@@ -45,7 +45,7 @@ def test_sparse_reordered_features_keep_targets_on_the_full_session_timeline():
     features = short_windows()(daily)
     # Interior omissions must not move labels to the next retained feature row.
     features = features.iloc[[0, 2, 5, 7, 12]].iloc[::-1]
-    targets = build_next_observation_targets(daily, value_col="log_rv").iloc[::-1]
+    targets = build_next_observation_targets(daily, value_col="value").iloc[::-1]
     original_features, original_targets = features.copy(deep=True), targets.copy(deep=True)
     prepared = prepare_forecast_data(features, targets)
 
@@ -57,7 +57,7 @@ def test_sparse_reordered_features_keep_targets_on_the_full_session_timeline():
     )
     for index, row in zip(origins, prepared.itertuples(), strict=True):
         assert row.target_date == daily.loc[index + 1, "date"]
-        assert row.target == daily.loc[index + 1, "log_rv"]
+        assert row.target == daily.loc[index + 1, "value"]
     pd.testing.assert_frame_equal(features, original_features)
     pd.testing.assert_frame_equal(targets, original_targets)
 
@@ -65,7 +65,7 @@ def test_sparse_reordered_features_keep_targets_on_the_full_session_timeline():
 def test_any_feature_table_keyed_by_origin_can_be_prepared():
     daily = daily_sample()
     daily["other_outcome"] = np.arange(len(daily)) / 10 - 5
-    features = pd.DataFrame({"origin_date": daily.date, "input": daily.log_rv}).iloc[::2]
+    features = pd.DataFrame({"origin_date": daily.date, "input": daily.value}).iloc[::2]
     targets = pd.DataFrame(
         {
             "origin_date": daily.date,
@@ -107,7 +107,7 @@ def test_any_feature_table_keyed_by_origin_can_be_prepared():
 def test_preparation_rejects_ambiguous_alignment_and_invalid_targets(corruption, message):
     daily = daily_sample()
     features = short_windows()(daily)
-    targets = build_next_observation_targets(daily, value_col="log_rv")
+    targets = build_next_observation_targets(daily, value_col="value")
     if corruption == "feature_labels":
         features["target"] = 0.0
     elif corruption == "feature_duplicate":
@@ -132,9 +132,9 @@ def test_preparation_rejects_ambiguous_alignment_and_invalid_targets(corruption,
         targets.loc[0, "target"] = np.inf
     elif corruption == "later_observation":
         targets["target_date"] = daily.date.shift(-2)
-        targets["target"] = daily.log_rv.shift(-2)
+        targets["target"] = daily.value.shift(-2)
     elif corruption == "duplicate_column":
-        features = pd.concat([features, features[["log_rv_daily"]]], axis=1)
+        features = pd.concat([features, features[["value_mean_1"]]], axis=1)
     with pytest.raises(ValueError, match=message):
         prepare_forecast_data(features, targets)
 
@@ -144,11 +144,9 @@ def test_empty_prepared_data_keeps_the_same_columns(cause):
     daily = daily_sample(1 if cause == "no_future" else 3)
     if cause == "no_data":
         daily = daily.iloc[:0]
-    windows = {"log_rv_daily": 1}
-    if cause != "no_future":
-        windows |= {"log_rv_weekly": 5, "log_rv_monthly": 22}
-    features = TrailingMeanFeatures(windows, value_col="log_rv")(daily)
-    targets = build_next_observation_targets(daily, value_col="log_rv")
+    windows = (1,) if cause == "no_future" else (1, 5, 22)
+    features = TrailingMeanFeatures("value", windows)(daily)
+    targets = build_next_observation_targets(daily, value_col="value")
     result = prepare_forecast_data(features, targets)
     assert result.empty
     assert list(result.columns) == ["origin_date", "target_date", *features.columns[1:], "target"]
@@ -157,7 +155,7 @@ def test_empty_prepared_data_keeps_the_same_columns(cause):
 def test_preparation_requires_the_target_timeline_before_feature_warmup():
     daily = daily_sample()
     features = short_windows()(daily)
-    targets = build_next_observation_targets(daily, value_col="log_rv").drop(index=1)
+    targets = build_next_observation_targets(daily, value_col="value").drop(index=1)
     with pytest.raises(ValueError, match="next observation"):
         prepare_forecast_data(features, targets)
 
@@ -215,3 +213,35 @@ def test_preparation_accepts_valid_nullable_and_numeric_text_features_without_mu
     np.testing.assert_array_equal(prepared.text, [-10, 0])
     np.testing.assert_array_equal(prepared.target, [0.0, 9.0])
     pd.testing.assert_frame_equal(features, original)
+
+
+def test_joined_features_keep_the_origins_every_table_covers():
+    daily = daily_sample()
+    short, long = TrailingMeanFeatures("value", (1,)), TrailingMeanFeatures("value", (4,))
+
+    joined = join_features([long(daily), short(daily).iloc[::-1]])
+
+    assert list(joined.columns) == ["origin_date", "value_mean_4", "value_mean_1"]
+    pd.testing.assert_frame_equal(
+        joined[["origin_date", "value_mean_1"]],
+        short(daily).iloc[3:].reset_index(drop=True),
+    )
+
+
+def test_a_single_feature_table_joins_to_itself():
+    features = short_windows()(daily_sample())
+
+    pd.testing.assert_frame_equal(join_features([features]), features)
+
+
+@pytest.mark.parametrize("problem", ["none", "same_name", "no_origin"])
+def test_joining_rejects_ambiguous_tables(problem):
+    features = short_windows()(daily_sample())
+    tables = {
+        "none": [],
+        "same_name": [features, features],
+        "no_origin": [features.drop(columns="origin_date")],
+    }[problem]
+
+    with pytest.raises(ValueError):
+        join_features(tables)

@@ -2,47 +2,43 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from dataclasses import KW_ONLY, dataclass
+from itertools import pairwise
 
 import numpy as np
 import pandas as pd
 
 
+@dataclass(frozen=True)
 class TrailingMeanFeatures:
-    """Build one feature per named window: the mean of the latest observations.
+    """Trailing means of one series, one feature per window.
 
-    A window of 1 is the current value. Windows count observations, not calendar
-    days, and each feature uses only values up to its origin. Rows before the
-    longest window is filled are dropped; with no windows the full origin
-    timeline is kept for models that learn from target history alone.
+    The feature ``<value_col>_mean_<w>`` at an origin is the mean of the latest
+    ``w`` observations up to and including it, so a window of 1 is the current
+    value. Windows count observations, not calendar days, and list the features
+    in increasing order. Rows before the longest window is filled are dropped;
+    with no windows the full origin timeline is kept for models that learn from
+    target history alone.
     """
 
-    def __init__(
-        self,
-        windows: Mapping[str, int],
-        *,
-        date_col: str = "date",
-        value_col: str = "value",
-        max_gap_days: int | None = None,
-    ) -> None:
-        self.windows = dict(windows)
-        self.date_col = date_col
-        self.value_col = value_col
-        self.max_gap_days = max_gap_days
-        self._validate_settings()
+    value_col: str
+    windows: tuple[int, ...]
+    _: KW_ONLY
+    date_col: str = "date"
+    max_gap_days: int | None = None
 
-    def _validate_settings(self) -> None:
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "windows", tuple(self.windows))
         columns = (self.date_col, self.value_col)
         if (
             any(not isinstance(name, str) or not name.strip() for name in columns)
             or self.date_col == self.value_col
         ):
             raise ValueError("date and value columns must have distinct non-empty names")
-        for name, window in self.windows.items():
-            if not isinstance(name, str) or not name.strip() or name == "origin_date":
-                raise ValueError("feature names must be non-empty and differ from 'origin_date'")
-            if isinstance(window, bool) or not isinstance(window, int) or window < 1:
-                raise ValueError(f"window for {name!r} must be a positive integer")
+        if any(isinstance(w, bool) or not isinstance(w, int) or w < 1 for w in self.windows):
+            raise ValueError("windows must be positive integers")
+        if any(a >= b for a, b in pairwise(self.windows)):
+            raise ValueError("windows must be strictly increasing")
         if self.max_gap_days is not None and (
             isinstance(self.max_gap_days, bool)
             or not isinstance(self.max_gap_days, int)
@@ -50,12 +46,22 @@ class TrailingMeanFeatures:
         ):
             raise ValueError("max_gap_days must be a positive integer or None")
 
+    def column(self, window: int) -> str:
+        """The name of the feature averaging the latest ``window`` observations."""
+        if window not in self.windows:
+            raise ValueError(f"no window of {window}; windows are {self.windows}")
+        return f"{self.value_col}_mean_{window}"
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        """Every feature name, in window order."""
+        return tuple(self.column(window) for window in self.windows)
+
     def __call__(self, data: pd.DataFrame) -> pd.DataFrame:
-        self._validate_settings()
         ordered = self._ordered(data)
         values = ordered["value"]
         features = pd.DataFrame({"origin_date": ordered["date"]})
-        for name, window in self.windows.items():
+        for window, name in zip(self.windows, self.columns, strict=True):
             features[name] = values if window == 1 else values.rolling(window).mean()
         return features.dropna().reset_index(drop=True)
 

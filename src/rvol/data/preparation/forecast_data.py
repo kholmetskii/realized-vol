@@ -2,10 +2,33 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 
 TARGET_COLUMNS = ("target_date", "target")
+
+
+def join_features(tables: Sequence[pd.DataFrame]) -> pd.DataFrame:
+    """Join feature tables by origin, keeping the origins every table covers.
+
+    Each table has an ``origin_date`` column and its own feature columns; a
+    feature name may appear in only one table.
+    """
+    if not tables:
+        raise ValueError("at least one feature table is required")
+    names: list[str] = []
+    for table in tables:
+        if "origin_date" not in table.columns:
+            raise ValueError("every feature table needs an origin_date column")
+        names.extend(name for name in table.columns if name != "origin_date")
+    if len(set(names)) != len(names):
+        raise ValueError("feature names must be unique across tables")
+    joined = tables[0]
+    for table in tables[1:]:
+        joined = joined.merge(table, on="origin_date", how="inner", validate="one_to_one")
+    return joined.sort_values("origin_date").reset_index(drop=True)
 
 
 def prepare_forecast_data(

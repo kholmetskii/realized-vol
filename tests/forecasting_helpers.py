@@ -20,16 +20,17 @@ def daily_sample(n: int = 85) -> pd.DataFrame:
     return pd.DataFrame({"date": pd.bdate_range("2023-01-02", periods=n), "log_rv": values})
 
 
-WINDOWS = experiment.HAR_WINDOWS
 ALL_FEATURES = experiment.HAR_FEATURES
+LATEST = experiment.LOG_RV_MEANS.column(1)
 benchmark_models = experiment.benchmark_models
 
 
 def har_features(names: tuple[str, ...] = ALL_FEATURES) -> TrailingMeanFeatures:
-    """The selected HAR inputs of the log_rv column, as in rvol.experiment."""
-    return TrailingMeanFeatures(
-        {name: WINDOWS[name] for name in names}, value_col="log_rv", max_gap_days=7
-    )
+    """The study's log RV means restricted to the named columns, so the warm-up
+    follows the longest window those columns use."""
+    means = experiment.LOG_RV_MEANS
+    windows = tuple(window for window in means.windows if means.column(window) in names)
+    return TrailingMeanFeatures(means.value_col, windows, max_gap_days=means.max_gap_days)
 
 
 def prepared_log_rv(

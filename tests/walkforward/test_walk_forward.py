@@ -9,6 +9,7 @@ from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
 from rvol.walkforward import FORECAST_COLUMNS, walk_forward
 from tests.forecasting_helpers import (
     ALL_FEATURES,
+    LATEST,
     benchmark_models,
     daily_sample,
     har_features,
@@ -51,9 +52,9 @@ def test_changing_future_data_cannot_change_earlier_forecasts():
 
 
 def test_training_uses_exactly_the_outcomes_observed_at_each_origin():
-    data = prepared_log_rv(feature_columns=("log_rv_daily",))
+    data = prepared_log_rv(feature_columns=(LATEST,))
 
-    ar1 = ForecastModel("AR1", LinearRegression(), ("log_rv_daily",))
+    ar1 = ForecastModel("AR1", LinearRegression(), (LATEST,))
     forecasts = walk_forward(data, ar1, min_train_size=10)
 
     assert forecasts.n_train.iloc[0] == 10
@@ -168,7 +169,7 @@ def test_reusing_a_model_object_gives_identical_forecasts():
     "corruption", ["missing_column", "origin_not_before_target", "duplicate", "missing_date", "inf"]
 )
 def test_invalid_data_is_rejected(corruption):
-    data = prepared_log_rv(feature_columns=("log_rv_daily",))
+    data = prepared_log_rv(feature_columns=(LATEST,))
     if corruption == "missing_column":
         data = data.drop(columns="target")
     elif corruption == "origin_not_before_target":
@@ -178,9 +179,9 @@ def test_invalid_data_is_rejected(corruption):
     elif corruption == "missing_date":
         data.loc[0, "target_date"] = pd.NaT
     else:
-        data.loc[0, "log_rv_daily"] = np.inf
+        data.loc[0, LATEST] = np.inf
     with pytest.raises(ValueError):
-        ar1 = ForecastModel("AR1", LinearRegression(), ("log_rv_daily",))
+        ar1 = ForecastModel("AR1", LinearRegression(), (LATEST,))
         walk_forward(data, ar1, min_train_size=10)
 
 

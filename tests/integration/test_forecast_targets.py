@@ -4,16 +4,16 @@ import pandas as pd
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
 from rvol.models import ForecastModel, LinearRegression
 from rvol.walkforward import walk_forward
-from tests.forecasting_helpers import daily_sample, har_features
+from tests.forecasting_helpers import LATEST, daily_sample, har_features
 
 
 def test_next_session_labels_become_available_only_at_their_target_date():
     daily = daily_sample()
     prepared = prepare_forecast_data(
-        har_features(("log_rv_daily",))(daily),
+        har_features((LATEST,))(daily),
         build_next_observation_targets(daily, value_col="log_rv"),
     )
-    ar1 = ForecastModel("AR1", LinearRegression(), ("log_rv_daily",))
+    ar1 = ForecastModel("AR1", LinearRegression(), (LATEST,))
     result = walk_forward(prepared, ar1, min_train_size=10)
     for row in result.itertuples():
         available = prepared.loc[prepared.target_date <= row.origin_date]

@@ -25,19 +25,27 @@ import pandas as pd
 from rvol.data.preparation import (
     TrailingMeanFeatures,
     build_next_observation_targets,
+    join_features,
     prepare_forecast_data,
 )
 from rvol.evaluation import compare_models, forecast_losses, qlike, win_rates
 from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
 from rvol.walkforward import smeared_forecasts, walk_forward
 
-# HAR inputs (Corsi, 2009): the current log RV and its weekly and monthly means.
-HAR_WINDOWS = {"log_rv_daily": 1, "log_rv_weekly": 5, "log_rv_monthly": 22}
-HAR_FEATURES = tuple(HAR_WINDOWS)
+#: The daily column the models forecast, one session ahead.
+LOG_RV = "log_rv"
 
-#: A trailing window may span at most this many calendar days per session; a
-#: longer gap (a data outage, not a weekend or holiday) leaves the feature empty.
+#: Consecutive sessions may be at most this many calendar days apart; a longer
+#: gap is a data outage, not a weekend or holiday, and stops feature building.
 MAX_GAP_DAYS = 7
+
+#: HAR (Corsi, 2009) averages log RV over roughly a day, a week and a month of sessions.
+HAR_WINDOWS = (1, 5, 22)
+LOG_RV_MEANS = TrailingMeanFeatures(LOG_RV, HAR_WINDOWS, max_gap_days=MAX_GAP_DAYS)
+HAR_FEATURES = LOG_RV_MEANS.columns
+
+#: Every feature table the study builds; ``prepare`` joins them by origin.
+FEATURE_TABLES = (LOG_RV_MEANS,)
 
 #: Every fit uses at least this many observed outcomes, about one year of sessions.
 MIN_TRAIN_SESSIONS = 252
@@ -59,19 +67,19 @@ def benchmark_models() -> tuple[ForecastModel, ...]:
         ForecastModel("naive", ExponentialSmoothing(decay=0.0)),  # tomorrow equals today
         # 0.94 is RiskMetrics' daily decay for squared returns; here it smooths log RV.
         ForecastModel("EWMA", ExponentialSmoothing(decay=0.94)),
-        ForecastModel("AR1", LinearRegression(), ("log_rv_daily",)),
+        ForecastModel("AR1", LinearRegression(), (LOG_RV_MEANS.column(1),)),
         ForecastModel("HAR", LinearRegression(), HAR_FEATURES),
     )
 
 
 def prepare(daily: pd.DataFrame) -> pd.DataFrame:
-    """Build every HAR feature and the next-session target from daily log RV.
+    """Build every feature table and the next-session target from the daily table.
 
     One table holds all features, so every model forecasts the same dates.
     """
     return prepare_forecast_data(
-        TrailingMeanFeatures(HAR_WINDOWS, value_col="log_rv", max_gap_days=MAX_GAP_DAYS)(daily),
-        build_next_observation_targets(daily, value_col="log_rv"),
+        join_features([build(daily) for build in FEATURE_TABLES]),
+        build_next_observation_targets(daily, value_col=LOG_RV),
     )
 
 
