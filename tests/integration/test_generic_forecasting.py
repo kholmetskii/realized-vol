@@ -2,12 +2,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol import study
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
 from rvol.evaluation import forecast_losses
 from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
 from rvol.walkforward import walk_forward
-from tests.forecasting_helpers import benchmark_models, lag_features, prepared_log_rv
+from tests.forecasting_helpers import MEANS, benchmark_models, lag_features, prepared_log_rv
 from tests.losses import absolute_error, squared_error
 
 
@@ -62,6 +61,6 @@ def test_each_model_waits_only_for_the_inputs_it_uses():
         forecasts = walk_forward(data, model, min_train_size=5)
 
         # The monthly mean waits for 22 sessions; every other input is ready at once.
-        monthly = study.LOG_RV_MEANS.column(22) in model.regressors
+        monthly = MEANS.column(22) in model.regressors
         first_target = pd.bdate_range("2023-01-02", periods=50)[27 if monthly else 6]
         assert forecasts.target_date.iloc[0] == first_target

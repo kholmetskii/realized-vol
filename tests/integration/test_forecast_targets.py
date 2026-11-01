@@ -4,13 +4,13 @@ import pandas as pd
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
 from rvol.models import ForecastModel, LinearRegression
 from rvol.walkforward import walk_forward
-from tests.forecasting_helpers import LATEST, daily_sample, study_features
+from tests.forecasting_helpers import LATEST, daily_sample, selected_features
 
 
 def test_next_session_labels_become_available_only_at_their_target_date():
     daily = daily_sample()
     prepared = prepare_forecast_data(
-        study_features((LATEST,))(daily),
+        selected_features((LATEST,))(daily),
         build_next_observation_targets(daily, value_col="log_rv"),
     )
     ar1 = ForecastModel("AR1", LinearRegression(), (LATEST,))

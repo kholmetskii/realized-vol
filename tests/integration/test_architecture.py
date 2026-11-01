@@ -21,16 +21,6 @@ PACKAGE_DEPENDENCIES = {
     "data.volatility": {"data.volatility", "data.market", "estimators"},
     "estimators": {"estimators", "estimators.variance"},
     "estimators.variance": set(),
-    # The study is the one package that joins the generic tools to the volatility data.
-    "study": {
-        "study",
-        "walkforward",
-        "data",
-        "data.preparation",
-        "data.volatility",
-        "evaluation",
-        "models",
-    },
 }
 
 

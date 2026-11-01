@@ -8,13 +8,13 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
-from rvol import study
 from rvol.data.preparation import (
+    TrailingMeanFeatures,
     build_next_observation_targets,
     join_features,
     prepare_forecast_data,
 )
-from rvol.models import ForecastModel
+from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
 
 
 def with_semivariances(daily: pd.DataFrame, seed: int = 72) -> pd.DataFrame:
@@ -33,21 +33,42 @@ def daily_sample(n: int = 85) -> pd.DataFrame:
     return with_semivariances(daily)
 
 
-ALL_FEATURES = tuple(column for table in study.FEATURE_TABLES for column in table.columns)
-LATEST = study.LOG_RV_MEANS.column(1)
-benchmark_models = study.benchmark_models
+# Realistic inputs for the generic engine: HAR's log RV means and SHAR's semivariances.
+MEANS = TrailingMeanFeatures("log_rv", (1, 5, 22), max_gap_days=7)
+RISES = TrailingMeanFeatures("log_rs_pos", (1,), max_gap_days=7)
+FALLS = TrailingMeanFeatures("log_rs_neg", (1,), max_gap_days=7)
+FEATURE_TABLES = (MEANS, RISES, FALLS)
+HAR_FEATURES = MEANS.columns
+ALL_FEATURES = tuple(column for table in FEATURE_TABLES for column in table.columns)
+LATEST = MEANS.column(1)
 
 
-def study_features(names: tuple[str, ...] = ALL_FEATURES) -> Callable[[pd.DataFrame], pd.DataFrame]:
-    """The study's feature tables restricted to the named columns, so the
-    warm-up follows the longest window those columns use."""
+def benchmark_models() -> tuple[ForecastModel, ...]:
+    """Both forecasting rules with the regressors of the usual volatility models."""
+    return (
+        ForecastModel("historical_mean", LinearRegression()),
+        ForecastModel("naive", ExponentialSmoothing(decay=0.0)),
+        ForecastModel("EWMA", ExponentialSmoothing(decay=0.94)),
+        ForecastModel("AR1", LinearRegression(), (LATEST,)),
+        ForecastModel("HAR", LinearRegression(), HAR_FEATURES),
+        ForecastModel(
+            "SHAR", LinearRegression(), (*RISES.columns, *FALLS.columns, *HAR_FEATURES[1:])
+        ),
+    )
+
+
+def selected_features(
+    names: tuple[str, ...] = ALL_FEATURES,
+) -> Callable[[pd.DataFrame], pd.DataFrame]:
+    """The feature tables restricted to the named columns, so the warm-up
+    follows the longest window those columns use."""
     builders = []
-    for table in study.FEATURE_TABLES:
+    for table in FEATURE_TABLES:
         windows = tuple(window for window in table.windows if table.column(window) in names)
         if windows:
             builders.append(dataclasses.replace(table, windows=windows))
     if not builders:  # no regressors: keep the full origin timeline
-        builders.append(dataclasses.replace(study.LOG_RV_MEANS, windows=()))
+        builders.append(dataclasses.replace(MEANS, windows=()))
     return lambda daily: join_features([build(daily) for build in builders])
 
 
@@ -58,8 +79,8 @@ def prepared_log_rv(
 ) -> pd.DataFrame:
     daily = daily_sample(n)
     return prepare_forecast_data(
-        study_features(feature_columns)(daily),
-        build_next_observation_targets(daily, value_col=study.LOG_RV),
+        selected_features(feature_columns)(daily),
+        build_next_observation_targets(daily, value_col="log_rv"),
     )
 
 

@@ -4,17 +4,17 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol import study
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
 from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
 from rvol.walkforward import FORECAST_COLUMNS, walk_forward
 from tests.forecasting_helpers import (
+    HAR_FEATURES,
     LATEST,
     benchmark_models,
     daily_sample,
     prepared_log_rv,
     reference_predictions,
-    study_features,
+    selected_features,
 )
 
 
@@ -39,7 +39,7 @@ def test_changing_future_data_cannot_change_earlier_forecasts():
 
         def run(frame, model=model):
             prepared = prepare_forecast_data(
-                study_features(model.regressors)(frame),
+                selected_features(model.regressors)(frame),
                 build_next_observation_targets(frame, value_col="log_rv"),
             )
             return walk_forward(prepared, model, min_train_size=15)
@@ -64,7 +64,7 @@ def test_training_uses_exactly_the_outcomes_observed_at_each_origin():
 
 def test_bounds_select_target_dates_without_changing_forecasts():
     data = prepared_log_rv()
-    model = ForecastModel("HAR", LinearRegression(), study.HAR_FEATURES)
+    model = ForecastModel("HAR", LinearRegression(), HAR_FEATURES)
     full = walk_forward(data, model, min_train_size=15)
     start, end = full.target_date.iloc[7].date(), full.target_date.iloc[-4].date()
 
