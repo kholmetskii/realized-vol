@@ -73,17 +73,27 @@ The study design (forecast and evaluation dates, the minimum training sample,
 the candidate model, the loss, the ridge grid) is a set of named constants in
 `rvol/study/design.py`; every function uses them as defaults.
 
-The full study, with figures and explanations, is one notebook per asset:
-[`notebooks/01_eurusd.ipynb`](notebooks/01_eurusd.ipynb). Install its extras with
-`pip install -e ".[notebooks]"`, then rerun it from the terminal with
+The study, with figures and explanations, is one notebook per research
+question; each covers every asset in `study.ASSETS`:
+
+| notebook | question |
+|---|---|
+| [`01_data`](notebooks/01_data.ipynb) | Is our volatility measure sound? |
+| [`02_har`](notebooks/02_har.ipynb) | Does HAR beat simple benchmarks? Also explains the methods. |
+| [`03_asymmetry`](notebooks/03_asymmetry.ipynb) | Do rises and falls predict volatility differently? |
+| [`04_shrinkage`](notebooks/04_shrinkage.ipynb) | Does a ridge penalty help HAR? |
+
+Install the extras with `pip install -e ".[notebooks]"`, then rerun them all
+from the terminal with
 
 ```bash
-jupyter nbconvert --to notebook --execute --inplace notebooks/01_eurusd.ipynb
+jupyter nbconvert --to notebook --execute --inplace notebooks/0*.ipynb
 ```
 
-Its figures come from `notebooks/_plots.py`, and every number in its text is
-printed by a code cell, so a rerun on new data leaves no stale figure. For
-another pair, copy it and change `ASSET`; only the commentary is written by hand.
+Shared code lives in `notebooks/_common.py` (assets, data, study runs) and
+`notebooks/_plots.py` (figures, one panel per asset). Every number in the text
+is printed by a code cell, so a rerun on new data or more assets leaves nothing
+stale; each notebook ends with its answer per asset.
 
 ## Extending
 
