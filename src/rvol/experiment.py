@@ -3,7 +3,7 @@
 Call these functions in order:
 
     prepared = prepare(daily)
-    forecasts = forecast(prepared, benchmark_models(), asset="EURUSD")
+    forecasts = forecast(prepared, study_models(prepared), asset="EURUSD")
     comparison = compare(forecasts)
     results_table(comparison)
 
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -44,14 +44,26 @@ HAR_WINDOWS = (1, 5, 22)
 LOG_RV_MEANS = TrailingMeanFeatures(LOG_RV, HAR_WINDOWS, max_gap_days=MAX_GAP_DAYS)
 HAR_FEATURES = LOG_RV_MEANS.columns
 
+#: SHAR (Patton & Sheppard, 2015) splits HAR's daily term by the sign of each
+#: return: today's log semivariances replace today's log RV, and the weekly and
+#: monthly means stay. Patton and Sheppard use levels; logs here match HAR.
+LOG_RS_POS = TrailingMeanFeatures("log_rs_pos", (1,), max_gap_days=MAX_GAP_DAYS)
+LOG_RS_NEG = TrailingMeanFeatures("log_rs_neg", (1,), max_gap_days=MAX_GAP_DAYS)
+SHAR_FEATURES = (
+    *LOG_RS_POS.columns,
+    *LOG_RS_NEG.columns,
+    *(LOG_RV_MEANS.column(window) for window in HAR_WINDOWS[1:]),
+)
+
 #: Every feature table the study builds; ``prepare`` joins them by origin.
-FEATURE_TABLES = (LOG_RV_MEANS,)
+FEATURE_TABLES = (LOG_RV_MEANS, LOG_RS_POS, LOG_RS_NEG)
 
 #: Every fit uses at least this many observed outcomes, about one year of sessions.
 MIN_TRAIN_SESSIONS = 252
 
 #: The first and last target dates forecast. Forecasts before EVALUATION_START
-#: only supply errors for the smearing factor; they are never scored.
+#: form the calibration window: they supply errors for the smearing factor and
+#: choose the ridge penalty, and the evaluation never scores them.
 FORECAST_START = date(2024, 10, 1)
 EVALUATION_START = date(2025, 1, 1)
 FORECAST_END = date(2026, 9, 30)
@@ -59,9 +71,14 @@ FORECAST_END = date(2026, 9, 30)
 #: The model every other model is tested against.
 CANDIDATE = "HAR"
 
+#: Ridge penalties tried for HAR. The penalty multiplies the squared slopes
+#: against the summed squared errors, so the same penalty shrinks less as the
+#: training sample grows.
+RIDGE_GRID = (0.1, 1.0, 10.0, 100.0)
+
 
 def benchmark_models() -> tuple[ForecastModel, ...]:
-    """The five models of the study: two forecasting rules with different regressors."""
+    """The models with fixed settings: two forecasting rules with different regressors."""
     return (
         ForecastModel("historical_mean", LinearRegression()),  # no regressors: the mean
         ForecastModel("naive", ExponentialSmoothing(decay=0.0)),  # tomorrow equals today
@@ -69,7 +86,50 @@ def benchmark_models() -> tuple[ForecastModel, ...]:
         ForecastModel("EWMA", ExponentialSmoothing(decay=0.94)),
         ForecastModel("AR1", LinearRegression(), (LOG_RV_MEANS.column(1),)),
         ForecastModel("HAR", LinearRegression(), HAR_FEATURES),
+        ForecastModel("SHAR", LinearRegression(), SHAR_FEATURES),
     )
+
+
+def ridge_har(penalty: float) -> ForecastModel:
+    """HAR's regressors fitted with a ridge penalty on the slopes."""
+    return ForecastModel("HAR-ridge", LinearRegression(ridge=penalty), HAR_FEATURES)
+
+
+def ridge_calibration(
+    prepared: pd.DataFrame,
+    grid: Sequence[float] = RIDGE_GRID,
+    *,
+    start: date = FORECAST_START,
+    end: date = EVALUATION_START,
+    min_train_size: int = MIN_TRAIN_SESSIONS,
+) -> pd.Series:
+    """Mean QLIKE of ridge HAR for each penalty, over targets in [start, end).
+
+    The forecasts are made walk-forward and smeared exactly as in the study, so
+    the score uses only targets before ``end``: by default the calibration
+    window, which the evaluation never scores.
+    """
+    if not grid:
+        raise ValueError("at least one penalty is required")
+    scores = {}
+    for penalty in grid:
+        log_forecasts = walk_forward(
+            prepared,
+            ridge_har(penalty),
+            min_train_size=min_train_size,
+            start=start,
+            end=end - timedelta(days=1),
+        )
+        losses = forecast_losses(smeared_forecasts(log_forecasts), qlike)
+        scores[penalty] = float(losses["loss"].mean())
+    return pd.Series(scores, name="calibration QLIKE").rename_axis("ridge penalty")
+
+
+def study_models(prepared: pd.DataFrame) -> tuple[ForecastModel, ...]:
+    """Every model of the study: the benchmark models and ridge HAR, whose
+    penalty is the grid value with the lowest calibration QLIKE."""
+    penalty = float(ridge_calibration(prepared).idxmin())
+    return (*benchmark_models(), ridge_har(penalty))
 
 
 def prepare(daily: pd.DataFrame) -> pd.DataFrame:

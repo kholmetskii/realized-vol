@@ -2,35 +2,53 @@
 
 from __future__ import annotations
 
+import dataclasses
+from collections.abc import Callable
+
 import numpy as np
 import pandas as pd
 
 from rvol import experiment
 from rvol.data.preparation import (
-    TrailingMeanFeatures,
     build_next_observation_targets,
+    join_features,
     prepare_forecast_data,
 )
 from rvol.models import ForecastModel
 
 
+def with_semivariances(daily: pd.DataFrame, seed: int = 72) -> pd.DataFrame:
+    """Add log semivariances that split each session's RV at a random share."""
+    share = np.random.default_rng(seed).uniform(0.3, 0.7, len(daily))
+    return daily.assign(
+        log_rs_pos=daily["log_rv"] + np.log(share),
+        log_rs_neg=daily["log_rv"] + np.log1p(-share),
+    )
+
+
 def daily_sample(n: int = 85) -> pd.DataFrame:
     steps = np.arange(n)
     values = -10 + 0.3 * np.sin(steps / 4) + np.random.default_rng(71).normal(0, 0.04, n)
-    return pd.DataFrame({"date": pd.bdate_range("2023-01-02", periods=n), "log_rv": values})
+    daily = pd.DataFrame({"date": pd.bdate_range("2023-01-02", periods=n), "log_rv": values})
+    return with_semivariances(daily)
 
 
-ALL_FEATURES = experiment.HAR_FEATURES
+ALL_FEATURES = tuple(column for table in experiment.FEATURE_TABLES for column in table.columns)
 LATEST = experiment.LOG_RV_MEANS.column(1)
 benchmark_models = experiment.benchmark_models
 
 
-def har_features(names: tuple[str, ...] = ALL_FEATURES) -> TrailingMeanFeatures:
-    """The study's log RV means restricted to the named columns, so the warm-up
-    follows the longest window those columns use."""
-    means = experiment.LOG_RV_MEANS
-    windows = tuple(window for window in means.windows if means.column(window) in names)
-    return TrailingMeanFeatures(means.value_col, windows, max_gap_days=means.max_gap_days)
+def study_features(names: tuple[str, ...] = ALL_FEATURES) -> Callable[[pd.DataFrame], pd.DataFrame]:
+    """The study's feature tables restricted to the named columns, so the
+    warm-up follows the longest window those columns use."""
+    builders = []
+    for table in experiment.FEATURE_TABLES:
+        windows = tuple(window for window in table.windows if table.column(window) in names)
+        if windows:
+            builders.append(dataclasses.replace(table, windows=windows))
+    if not builders:  # no regressors: keep the full origin timeline
+        builders.append(dataclasses.replace(experiment.LOG_RV_MEANS, windows=()))
+    return lambda daily: join_features([build(daily) for build in builders])
 
 
 def prepared_log_rv(
@@ -40,8 +58,8 @@ def prepared_log_rv(
 ) -> pd.DataFrame:
     daily = daily_sample(n)
     return prepare_forecast_data(
-        har_features(feature_columns)(daily),
-        build_next_observation_targets(daily, value_col="log_rv"),
+        study_features(feature_columns)(daily),
+        build_next_observation_targets(daily, value_col=experiment.LOG_RV),
     )
 
 

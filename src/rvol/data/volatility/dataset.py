@@ -9,15 +9,22 @@ import numpy as np
 import pandas as pd
 
 from rvol.data.market import MIN_SESSION_HOURS, full_sessions, session_labels, session_window
-from rvol.estimators import last_tick_sample, sampled_realized_variance
+from rvol.estimators import last_tick_sample, realized_semivariances, realized_variance
 
 #: Five-minute prices: fine enough to measure the day's movement, coarse enough
 #: that bid-ask bounce does not dominate it (the usual compromise in the literature).
 SAMPLING_FREQUENCY = "5min"
 
 #: The output columns. ``rv`` is the session's realized variance at the chosen
-#: sampling frequency and ``observation_count`` the number of sampled prices.
-COLUMNS = ["date", "rv", "log_rv", "observation_count"]
+#: sampling frequency, ``rs_pos`` and ``rs_neg`` its parts from positive and
+#: negative returns, and ``observation_count`` the number of sampled prices.
+VARIANCE_COLUMNS = ["rv", "rs_pos", "rs_neg"]
+COLUMNS = [
+    "date",
+    *VARIANCE_COLUMNS,
+    *(f"log_{name}" for name in VARIANCE_COLUMNS),
+    "observation_count",
+]
 
 #: How far the data may start after the first session opens, or end before the
 #: last session closes, for those sessions to count as complete.
@@ -56,19 +63,24 @@ def _summarize_sessions(
     if complete.empty:
         return pd.DataFrame(columns=COLUMNS)
 
-    sessions = complete.groupby(session_labels(complete))
-    rv = sessions.apply(lambda session: sampled_realized_variance(session, frequency)).dropna()
-    counts = sessions.apply(lambda session: float(len(last_tick_sample(session, frequency))))
-    counts = counts.reindex(rv.index)
-    result = pd.DataFrame(
-        {
-            "date": pd.to_datetime(rv.index),
-            "rv": rv.to_numpy(dtype="float64"),
-            "observation_count": counts.to_numpy(dtype="int64"),
-        }
-    )
-    result = result[np.isfinite(result["rv"]) & (result["rv"] > 0)].copy()
-    result["log_rv"] = np.log(result["rv"])
+    rows = []
+    for day, session in complete.groupby(session_labels(complete)):
+        sampled = last_tick_sample(session, frequency).to_numpy()
+        if len(sampled) < 2:
+            continue
+        rs_pos, rs_neg = realized_semivariances(sampled)
+        variances = (realized_variance(sampled), rs_pos, rs_neg)
+        rows.append((day, *variances, len(sampled)))
+    result = pd.DataFrame(rows, columns=["date", *VARIANCE_COLUMNS, "observation_count"])
+    result["date"] = pd.to_datetime(result["date"])
+    result = result.astype({name: "float64" for name in VARIANCE_COLUMNS})
+    result = result.astype({"observation_count": "int64"})
+    # Every log must exist: a session whose returns all share one sign has a
+    # zero semivariance and is dropped, like a session without price changes.
+    positive = (result[VARIANCE_COLUMNS] > 0).all(axis=1)
+    result = result[positive & np.isfinite(result[VARIANCE_COLUMNS]).all(axis=1)].copy()
+    for name in VARIANCE_COLUMNS:
+        result[f"log_{name}"] = np.log(result[name])
     return result[COLUMNS]
 
 
@@ -79,6 +91,11 @@ def build_daily_dataset(
     min_session_hours: float = MIN_SESSION_HOURS,
 ) -> pd.DataFrame:
     """Build daily RV while reading tick chunks one at a time, in time order.
+
+    Each session's prices are sampled on a ``frequency`` grid, and RV and its
+    semivariances sum the squared log returns between those prices. Only
+    returns inside a session count: the return from one session's last price to
+    the next session's first is left out.
 
     The final FX session in each file is carried into the next file because a
     17:00 New York session normally crosses a UTC calendar boundary, so files

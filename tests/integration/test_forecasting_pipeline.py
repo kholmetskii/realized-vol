@@ -8,7 +8,8 @@ import pytest
 
 from rvol import experiment
 from rvol.evaluation import win_rates
-from rvol.models import ForecastModel
+from rvol.models import ForecastModel, LinearRegression
+from tests.forecasting_helpers import with_semivariances
 
 START, END = date(2024, 10, 1), date(2026, 9, 30)
 EVALUATION_START = date(2025, 1, 1)
@@ -49,12 +50,13 @@ for prefix in ('rvol.data', 'rvol.evaluation', 'rvol.experiment', 'matplotlib', 
 
 def daily_series(n: int = 600) -> pd.DataFrame:
     rng = np.random.default_rng(23)
-    return pd.DataFrame(
+    daily = pd.DataFrame(
         {
             "date": pd.bdate_range("2023-01-03", periods=n),
             "log_rv": -10 + np.sin(np.arange(n) / 4) / 5 + rng.normal(0, 0.3, n),
         }
     )
+    return with_semivariances(daily)
 
 
 def study_forecasts(models=None) -> pd.DataFrame:
@@ -119,3 +121,36 @@ def test_compare_rejects_a_missing_candidate_or_an_empty_window():
 def test_forecast_requires_at_least_one_model():
     with pytest.raises(ValueError, match="at least one model"):
         experiment.forecast(experiment.prepare(daily_series()), (), start=START, end=END)
+
+
+def test_the_ridge_penalty_is_the_calibration_minimum():
+    prepared = experiment.prepare(daily_series())
+
+    scores = experiment.ridge_calibration(prepared)
+    models = experiment.study_models(prepared)
+
+    assert scores.index.tolist() == list(experiment.RIDGE_GRID)
+    assert np.isfinite(scores).all()
+    ridge = models[-1]
+    assert ridge.name == "HAR-ridge" and ridge.regressors == experiment.HAR_FEATURES
+    assert isinstance(ridge.rule, LinearRegression) and ridge.rule.ridge == scores.idxmin()
+    assert [model.name for model in models[:-1]] == [
+        model.name for model in experiment.benchmark_models()
+    ]
+
+
+def test_the_ridge_calibration_never_sees_the_evaluation_period():
+    daily = daily_series()
+    changed = daily.copy()
+    later = changed["date"] >= pd.Timestamp(EVALUATION_START)
+    changed.loc[later, ["log_rv", "log_rs_pos", "log_rs_neg"]] += 2.0
+
+    before = experiment.ridge_calibration(experiment.prepare(daily))
+    after = experiment.ridge_calibration(experiment.prepare(changed))
+
+    pd.testing.assert_series_equal(before, after)
+
+
+def test_ridge_calibration_needs_a_penalty():
+    with pytest.raises(ValueError, match="penalty"):
+        experiment.ridge_calibration(experiment.prepare(daily_series()), ())

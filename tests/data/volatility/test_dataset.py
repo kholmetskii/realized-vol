@@ -5,15 +5,22 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.data.volatility import build_daily_dataset
+from rvol.data.volatility import COLUMNS, build_daily_dataset
 
 STEP = 1e-6  # log-price increase per minute
 
 
-def two_sessions() -> pd.DataFrame:
-    """One price a minute through two full sessions, 2024-01-16 and 2024-01-17."""
+def two_sessions(*, zigzag: bool = True) -> pd.DataFrame:
+    """One price a minute through two full sessions, 2024-01-16 and 2024-01-17.
+
+    The log price moves STEP a minute, up through one five-minute bin and down
+    through the next, so every five-minute return is +-5 * STEP and the signs
+    alternate; without the zigzag it only rises.
+    """
     timestamps = pd.date_range("2024-01-15 22:00", "2024-01-17 21:59", freq="1min", tz="UTC")
-    log_prices = np.log(1.10) + np.arange(len(timestamps)) * STEP
+    minutes = np.arange(len(timestamps))
+    signs = np.where((minutes // 5) % 2 == 0, 1.0, -1.0) if zigzag else np.ones(len(minutes))
+    log_prices = np.log(1.10) + np.cumsum(signs * STEP)
     return pd.DataFrame({"ts": timestamps, "mid": np.exp(log_prices)})
 
 
@@ -30,12 +37,31 @@ def test_sessions_split_across_files_give_the_expected_rv(tmp_path):
 
     result = build_daily_dataset([first, second], frequency="5min")
 
-    # 288 five-minute prices, 5 minutes apart in log price: 287 returns of 5 * STEP.
-    assert list(result.columns) == ["date", "rv", "log_rv", "observation_count"]
+    # 288 five-minute prices: 287 returns of +-5 * STEP.
+    assert list(result.columns) == list(COLUMNS)
     assert list(result["date"]) == [pd.Timestamp("2024-01-16"), pd.Timestamp("2024-01-17")]
     assert list(result["observation_count"]) == [288, 288]
     np.testing.assert_allclose(result["rv"], 287 * (5 * STEP) ** 2)
     assert np.isclose(cast(float, result.loc[0, "log_rv"]), np.log(287 * (5 * STEP) ** 2))
+
+
+def test_semivariances_split_each_session_by_return_sign(tmp_path):
+    result = build_daily_dataset([write(two_sessions(), tmp_path / "ticks.parquet")])
+
+    # Each session's 287 returns come from bins 1 to 287 after its first:
+    # 143 even (rising) bins and 144 odd (falling) ones.
+    np.testing.assert_allclose(result["rs_pos"], 143 * (5 * STEP) ** 2)
+    np.testing.assert_allclose(result["rs_neg"], 144 * (5 * STEP) ** 2)
+    np.testing.assert_allclose(result["log_rs_pos"], np.log(result["rs_pos"]))
+    np.testing.assert_allclose(result["log_rs_neg"], np.log(result["rs_neg"]))
+
+
+def test_sessions_with_returns_of_one_sign_are_dropped(tmp_path):
+    rising = two_sessions(zigzag=False)
+
+    result = build_daily_dataset([write(rising, tmp_path / "ticks.parquet")])
+
+    assert result.empty and list(result.columns) == list(COLUMNS)
 
 
 def test_overlapping_chunks_are_deduplicated(tmp_path):
