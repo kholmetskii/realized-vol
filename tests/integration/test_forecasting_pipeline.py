@@ -100,9 +100,9 @@ def test_results_table_summarises_the_comparison():
 
     summary = comparison.summary.set_index("model")
     pd.testing.assert_series_equal(
-        table["QLIKE"], summary.mean_loss.loc[table.index], check_names=False
+        table[experiment.LOSS_LABEL], summary.mean_loss.loc[table.index], check_names=False
     )
-    assert table["QLIKE"].is_monotonic_increasing
+    assert table[experiment.LOSS_LABEL].is_monotonic_increasing
     assert table.loc["HAR", "HAR lower by"] == 0
     np.testing.assert_allclose(table["DM p-value"], summary.p_value.loc[table.index])
     wins = win_rates(comparison.losses, "HAR").set_index("baseline_model").candidate_win_rate
@@ -154,3 +154,18 @@ def test_the_ridge_calibration_never_sees_the_evaluation_period():
 def test_ridge_calibration_needs_a_penalty():
     with pytest.raises(ValueError, match="penalty"):
         experiment.ridge_calibration(experiment.prepare(daily_series()), ())
+
+
+def specification(models):
+    """What defines each model before fitting: name, rule and settings, regressors."""
+    return [(m.name, type(m.rule), vars(m.rule), m.regressors) for m in models]
+
+
+def test_every_study_choice_is_made_before_the_evaluation_period():
+    prepared = experiment.prepare(daily_series())
+    before = prepared.loc[prepared["target_date"] < pd.Timestamp(experiment.EVALUATION_START)]
+
+    assert len(before) < len(prepared)
+    assert specification(experiment.study_models(before)) == specification(
+        experiment.study_models(prepared)
+    )

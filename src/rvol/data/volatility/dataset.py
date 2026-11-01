@@ -173,3 +173,30 @@ def build_daily_dataset(
         keep.iloc[-1] = keep.iloc[-1] and last_tick >= last_close - EDGE_TOLERANCE
         result = result[keep].reset_index(drop=True)
     return result
+
+
+def load_daily_dataset(
+    paths: Iterable[str | pathlib.Path],
+    cache: str | pathlib.Path,
+    *,
+    frequency: str = SAMPLING_FREQUENCY,
+) -> pd.DataFrame:
+    """The daily dataset of these tick files, read from ``cache`` when it is current.
+
+    The cache is rebuilt, and rewritten, when it is missing, older than any tick
+    file, or holds other columns than ``COLUMNS``. A change to how RV is
+    computed that keeps the columns is not detected: delete the cache then.
+    """
+    sources = sorted({pathlib.Path(path) for path in paths})
+    if not sources:
+        raise ValueError("at least one tick-data file is required")
+    target = pathlib.Path(cache)
+    newest_tick = max(path.stat().st_mtime for path in sources)
+    if target.is_file() and target.stat().st_mtime > newest_tick:
+        cached = pd.read_parquet(target)
+        if list(cached.columns) == COLUMNS:
+            return cached
+    daily = build_daily_dataset(sources, frequency=frequency)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    daily.to_parquet(target, index=False)
+    return daily

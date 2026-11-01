@@ -74,7 +74,7 @@ print(experiment.results_table(experiment.compare(forecasts)))
 ```
 
 The study design (forecast and evaluation dates, the minimum training sample,
-the candidate model, the ridge grid) is a set of named constants at the top of
+the candidate model, the loss, the ridge grid) is a set of named constants at the top of
 `rvol/experiment.py`; every function uses them as defaults.
 
 The full study, with figures and explanations, is one notebook per asset:

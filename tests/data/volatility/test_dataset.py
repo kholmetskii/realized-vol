@@ -1,3 +1,4 @@
+import os
 import pathlib
 from typing import cast
 
@@ -5,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.data.volatility import COLUMNS, build_daily_dataset
+from rvol.data.volatility import COLUMNS, build_daily_dataset, load_daily_dataset
 
 STEP = 1e-6  # log-price increase per minute
 
@@ -106,3 +107,44 @@ def test_sessions_cut_at_the_edges_of_the_data_are_dropped(tmp_path, cut, kept):
     result = build_daily_dataset([write(ticks, tmp_path / "ticks.parquet")])
 
     assert list(result["date"]) == [kept]
+
+
+def set_age(path: pathlib.Path, seconds: float) -> None:
+    os.utime(path, (seconds, seconds))
+
+
+def test_the_cache_is_built_once_and_then_read(tmp_path):
+    ticks = write(two_sessions(), tmp_path / "ticks.parquet")
+    cache = tmp_path / "derived" / "daily.parquet"
+
+    built = load_daily_dataset([ticks], cache)
+    marked = built.assign(rv=-1.0)  # a value no build produces
+    marked.to_parquet(cache, index=False)
+    set_age(ticks, 1_000)
+    set_age(cache, 2_000)
+
+    pd.testing.assert_frame_equal(built, build_daily_dataset([ticks]))
+    pd.testing.assert_frame_equal(load_daily_dataset([ticks], cache), marked)
+
+
+@pytest.mark.parametrize("stale", ["newer ticks", "other columns"])
+def test_a_stale_cache_is_rebuilt(tmp_path, stale):
+    ticks = write(two_sessions(), tmp_path / "ticks.parquet")
+    cache = tmp_path / "daily.parquet"
+    expected = build_daily_dataset([ticks])
+    if stale == "newer ticks":
+        expected.assign(rv=-1.0).to_parquet(cache, index=False)
+        set_age(cache, 1_000)
+        set_age(ticks, 2_000)
+    else:
+        expected.drop(columns="rs_pos").to_parquet(cache, index=False)
+        set_age(ticks, 1_000)
+        set_age(cache, 2_000)
+
+    pd.testing.assert_frame_equal(load_daily_dataset([ticks], cache), expected)
+    pd.testing.assert_frame_equal(pd.read_parquet(cache), expected)
+
+
+def test_loading_needs_tick_files(tmp_path):
+    with pytest.raises(ValueError, match="tick-data file"):
+        load_daily_dataset([], tmp_path / "daily.parquet")

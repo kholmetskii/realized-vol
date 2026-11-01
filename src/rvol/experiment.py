@@ -8,7 +8,7 @@ Call these functions in order:
     results_table(comparison)
 
 Models forecast next-session log RV. ``compare`` converts those forecasts to the
-variance scale with Duan smearing and scores them with QLIKE and DM tests.
+variance scale with Duan smearing and scores them with ``LOSS`` and DM tests.
 
 The constants below are the study design: every function uses them as its
 defaults, so one asset's notebook and another's run the same study.
@@ -71,6 +71,12 @@ FORECAST_END = date(2026, 9, 30)
 #: The model every other model is tested against.
 CANDIDATE = "HAR"
 
+#: The loss every variance forecast is scored with. QLIKE ranks forecasts
+#: correctly even though RV only measures the true variance with noise
+#: (Patton, 2011).
+LOSS = qlike
+LOSS_LABEL = LOSS.__name__.upper()
+
 #: Ridge penalties tried for HAR. The penalty multiplies the squared slopes
 #: against the summed squared errors, so the same penalty shrinks less as the
 #: training sample grows.
@@ -103,7 +109,7 @@ def ridge_calibration(
     end: date = EVALUATION_START,
     min_train_size: int = MIN_TRAIN_SESSIONS,
 ) -> pd.Series:
-    """Mean QLIKE of ridge HAR for each penalty, over targets in [start, end).
+    """Mean loss of ridge HAR for each penalty, over targets in [start, end).
 
     The forecasts are made walk-forward and smeared exactly as in the study, so
     the score uses only targets before ``end``: by default the calibration
@@ -120,14 +126,14 @@ def ridge_calibration(
             start=start,
             end=end - timedelta(days=1),
         )
-        losses = forecast_losses(smeared_forecasts(log_forecasts), qlike)
+        losses = forecast_losses(smeared_forecasts(log_forecasts), LOSS)
         scores[penalty] = float(losses["loss"].mean())
-    return pd.Series(scores, name="calibration QLIKE").rename_axis("ridge penalty")
+    return pd.Series(scores, name=f"calibration {LOSS_LABEL}").rename_axis("ridge penalty")
 
 
 def study_models(prepared: pd.DataFrame) -> tuple[ForecastModel, ...]:
     """Every model of the study: the benchmark models and ridge HAR, whose
-    penalty is the grid value with the lowest calibration QLIKE."""
+    penalty is the grid value with the lowest calibration loss."""
     penalty = float(ridge_calibration(prepared).idxmin())
     return (*benchmark_models(), ridge_har(penalty))
 
@@ -170,7 +176,7 @@ def forecast(
 
 @dataclass(frozen=True)
 class Comparison:
-    """Variance-scale forecasts, their QLIKE losses and the per-model summary."""
+    """Variance-scale forecasts, their losses and the per-model summary."""
 
     candidate: str
     forecasts: pd.DataFrame
@@ -184,7 +190,7 @@ def compare(
     evaluation_start: date = EVALUATION_START,
     candidate: str = CANDIDATE,
 ) -> Comparison:
-    """Convert log forecasts to variance with Duan smearing and score them with QLIKE.
+    """Convert log forecasts to variance with Duan smearing and score them with ``LOSS``.
 
     Forecasts before ``evaluation_start`` only supply errors for the smearing
     factor. Every other model is tested against ``candidate`` with the one-sided
@@ -200,23 +206,23 @@ def compare(
     )
     if window.empty:
         raise ValueError("no forecasts on or after evaluation_start")
-    losses = forecast_losses(window, qlike)
+    losses = forecast_losses(window, LOSS)
     return Comparison(candidate, window, losses, compare_models(losses, candidate))
 
 
 def results_table(comparison: Comparison) -> pd.DataFrame:
-    """One row per model, best first: mean QLIKE, the candidate's advantage,
+    """One row per model, best first: mean loss, the candidate's advantage,
     the DM p-value and the candidate's win rate."""
     candidate = comparison.candidate
     summary = comparison.summary.set_index("model")
     wins = win_rates(comparison.losses, candidate).set_index("baseline_model")
     table = pd.DataFrame(
         {
-            "QLIKE": summary["mean_loss"],
+            LOSS_LABEL: summary["mean_loss"],
             f"{candidate} lower by": 1 - summary.loc[candidate, "mean_loss"] / summary["mean_loss"],
             "DM p-value": summary["p_value"],
             f"{candidate} wins": wins["candidate_win_rate"],
         }
     )
     table.index.name = "model"
-    return table.sort_values("QLIKE")
+    return table.sort_values(LOSS_LABEL)
