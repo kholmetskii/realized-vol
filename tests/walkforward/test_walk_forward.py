@@ -6,7 +6,7 @@ import pytest
 
 from rvol.data.preparation import build_next_observation_targets, prepare_forecast_data
 from rvol.models import ExponentialSmoothing, ForecastModel, LinearRegression
-from rvol.walkforward import FORECAST_COLUMNS, walk_forward
+from rvol.walkforward import FORECAST_COLUMNS, fit_known, walk_forward, walk_forward_models
 from tests.forecasting_helpers import (
     HAR_FEATURES,
     LATEST,
@@ -202,3 +202,37 @@ def test_non_finite_predictions_are_rejected():
 
     with pytest.raises(ValueError, match="broken"):
         walk_forward(prepared_log_rv(), ForecastModel("broken", Broken()), min_train_size=15)
+
+
+def test_several_models_stack_the_forecasts_each_would_make_alone():
+    data = prepared_log_rv()
+    models = benchmark_models()
+
+    stacked = walk_forward_models(data, models, min_train_size=15, series="s")
+
+    expected = pd.concat(
+        [walk_forward(data, model, min_train_size=15, series="s") for model in models],
+        ignore_index=True,
+    )
+    pd.testing.assert_frame_equal(stacked, expected)
+    with pytest.raises(ValueError, match="at least one model"):
+        walk_forward_models(data, [], min_train_size=15)
+
+
+def test_a_known_fit_uses_only_outcomes_observed_before_the_date():
+    data = prepared_log_rv()
+    cutoff = data["target_date"].iloc[40]
+    model = ForecastModel("HAR", LinearRegression(), HAR_FEATURES)
+
+    fitted = fit_known(data, model, before=cutoff.date())
+
+    known = data.loc[data["target_date"] < cutoff]
+    expected = LinearRegression().fit(
+        known[list(HAR_FEATURES)].to_numpy(), known["target"].to_numpy()
+    )
+    assert len(known) == 40
+    assert isinstance(fitted, LinearRegression)
+    np.testing.assert_array_equal(fitted.coefficients, expected.coefficients)
+    assert fitted.intercept == expected.intercept
+    with pytest.raises(ValueError, match="no outcome"):
+        fit_known(data, model, before=data["target_date"].iloc[0].date())

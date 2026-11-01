@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import pandas as pd
+
+from rvol.data.preparation.targets import build_next_observation_targets
 
 TARGET_COLUMNS = ("target_date", "target")
 
@@ -87,4 +89,22 @@ def prepare_forecast_data(
         ]
         .sort_values("origin_date")
         .reset_index(drop=True)
+    )
+
+
+def build_forecast_data(
+    data: pd.DataFrame,
+    features: Sequence[Callable[[pd.DataFrame], pd.DataFrame]],
+    *,
+    value_col: str,
+    date_col: str = "date",
+) -> pd.DataFrame:
+    """Every feature table built from ``data``, joined by origin, with each origin's
+    next value of ``value_col`` as its target.
+
+    One table holds all features, so every model forecasts the same dates.
+    """
+    return prepare_forecast_data(
+        join_features([build(data) for build in features]),
+        build_next_observation_targets(data, date_col=date_col, value_col=value_col),
     )

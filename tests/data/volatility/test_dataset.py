@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rvol.data.volatility import COLUMNS, build_daily_dataset, load_daily_dataset
+from rvol.data.layout import DataLayout
+from rvol.data.volatility import COLUMNS, build_daily_dataset, daily_dataset, load_daily_dataset
 
 STEP = 1e-6  # log-price increase per minute
 
@@ -148,3 +149,18 @@ def test_a_stale_cache_is_rebuilt(tmp_path, stale):
 def test_loading_needs_tick_files(tmp_path):
     with pytest.raises(ValueError, match="tick-data file"):
         load_daily_dataset([], tmp_path / "daily.parquet")
+
+
+def test_an_asset_s_daily_dataset_is_read_through_its_layout(tmp_path):
+    layout = DataLayout(tmp_path)
+    layout.ticks("EURUSD").mkdir(parents=True)
+    write(two_sessions(), layout.ticks("EURUSD") / "ticks.parquet")
+
+    result = daily_dataset("eurusd", layout)
+
+    pd.testing.assert_frame_equal(
+        result, build_daily_dataset([layout.ticks("EURUSD") / "ticks.parquet"])
+    )
+    assert layout.daily_rv("EURUSD", "5min").is_file()
+    with pytest.raises(FileNotFoundError, match="no tick files"):
+        daily_dataset("GBPUSD", layout)

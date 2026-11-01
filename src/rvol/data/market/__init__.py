@@ -9,6 +9,7 @@ from rvol.data.market.sessions import (
     prices_per_session,
     session_labels,
     session_window,
+    sessions_per_year,
     trading_day,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "prices_per_session",
     "session_labels",
     "session_window",
+    "sessions_per_year",
     "trading_day",
 ]

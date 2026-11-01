@@ -2,6 +2,7 @@
 
 from rvol.data.preparation.forecast_data import (
     TARGET_COLUMNS,
+    build_forecast_data,
     join_features,
     prepare_forecast_data,
 )
@@ -11,6 +12,7 @@ from rvol.data.preparation.trailing_mean_features import TrailingMeanFeatures
 __all__ = [
     "TARGET_COLUMNS",
     "TrailingMeanFeatures",
+    "build_forecast_data",
     "build_next_observation_targets",
     "join_features",
     "prepare_forecast_data",

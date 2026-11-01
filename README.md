@@ -63,18 +63,22 @@ python -m rvol.data.sources.dukascopy EURUSD 2023-01-01 2023-03-31
 Run a comparison from the `notebooks` folder:
 
 ```python
-from _common import HAR, results_table, run_models
+from design import DESIGN, HAR, LAYOUT, LOG_RV, LOG_RV_MEANS
+from rvol.data.preparation import build_forecast_data
+from rvol.data.volatility import daily_dataset
+from rvol.evaluation import results_table
 from rvol.models import ExponentialSmoothing, ForecastModel
 
 naive = ForecastModel("naive", ExponentialSmoothing(decay=0.0))
-runs = run_models([HAR, naive])  # every asset: daily data from its ticks, then forecasts
-print(results_table(runs["EURUSD"].comparison))
+data = build_forecast_data(daily_dataset("EURUSD", LAYOUT), [LOG_RV_MEANS], value_col=LOG_RV)
+run = DESIGN.run(data, [HAR, naive], series="EURUSD")
+print(results_table(run.evaluation))
 ```
 
-The study design (assets, forecast and evaluation dates, the minimum training
-sample, the candidate model, the loss) is a set of named constants in
-`notebooks/_common.py`, together with HAR, the model every other is tested
-against. Each notebook defines the other models its question is about.
+The study design (forecast and evaluation dates, the minimum training sample,
+the candidate model, the loss) is a `StudyDesign` in `notebooks/design.py`,
+next to the assets and HAR, the model every other is tested against. Each
+notebook defines the other models its question is about.
 
 The study, with figures and explanations, is one notebook per research
 question; each covers every asset in `ASSETS`:
@@ -94,10 +98,10 @@ jupyter nbconvert --to notebook --execute --inplace notebooks/0*.ipynb
 ```
 
 Each notebook states its question, defines its models, and gives its answer
-per asset before the evidence. Shared code lives in `notebooks/_common.py`
-(design, data, HAR, forecasting steps) and `notebooks/_plots.py` (figures, one
-panel per asset); code only one notebook needs sits in a collapsed helpers cell
-inside it. Every number in the text is printed by a code cell, so a rerun on new
+per asset before the evidence. The notebooks share only `notebooks/design.py`
+(the study's choices) and `notebooks/_display.py` (figures and tables, one
+panel per asset); every computation they share is library code with tests, and
+code only one notebook needs sits in a collapsed helpers cell inside it. Every number in the text is printed by a code cell, so a rerun on new
 data or more assets leaves nothing stale.
 
 ## Extending
@@ -105,8 +109,8 @@ data or more assets leaves nothing stale.
 | add a | implement | pass to |
 |---|---|---|
 | forecasting rule | a class with `fit(X, y)` returning itself and `predict(X)` | `ForecastModel(name, rule, regressors)` |
-| feature | `TrailingMeanFeatures(column, windows)`, columns named `<column>_mean_<window>` | `run_models(models, features=[...])` |
-| model | `ForecastModel(name, rule, regressors)`, e.g. `ForecastModel("HAR-ridge-1", LinearRegression(ridge=1.0), HAR_FEATURES)` | `run_models` or `walk_forward` |
+| feature | `TrailingMeanFeatures(column, windows)`, columns named `<column>_mean_<window>` | `build_forecast_data(data, [...], value_col=...)` |
+| model | `ForecastModel(name, rule, regressors)`, e.g. `ForecastModel("HAR-ridge-1", LinearRegression(ridge=1.0), HAR_FEATURES)` | `StudyDesign.run` or `walk_forward` |
 | loss | a function `loss(actual, predicted)` returning one loss per forecast | `forecast_losses` |
 
 ## Project layout
@@ -119,8 +123,8 @@ src/rvol/
 ├── walkforward/   walk-forward forecasts, smearing
 └── evaluation/    losses, Diebold–Mariano test, robustness checks
 notebooks/
-├── _common.py     the study design, data, HAR and forecasting steps
-├── _plots.py      figures, one panel per asset
+├── design.py      the study's choices: assets, dates, loss, HAR
+├── _display.py    figures and tables, one panel per asset
 └── 0*.ipynb       one notebook per research question
 tests/             unit and integration tests of the library, laid out like src/rvol/
 ```
@@ -131,9 +135,10 @@ its API from `__init__.py`.
 `models`, `walkforward`, `evaluation` and `data.preparation` know nothing about
 volatility or markets; a test checks their imports and vocabulary.
 Domain code lives in `data.sources`, `data.market`, `data.volatility` and
-`estimators`. The study combines the two; it is the application built on the
-library, lives in the notebooks, and is checked by them rather than by the test
-suite (`04_shrinkage` stops if its tuning used evaluation data).
+`estimators`. The study is the application built on the library: its choices
+live in `notebooks/design.py` and its models in the notebooks, which combine the
+two kinds of library code (`04_shrinkage` stops if its tuning used evaluation
+data).
 
 ## Limitations
 

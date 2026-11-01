@@ -4,6 +4,7 @@ import pytest
 
 from rvol.data.preparation import (
     TrailingMeanFeatures,
+    build_forecast_data,
     build_next_observation_targets,
     join_features,
     prepare_forecast_data,
@@ -245,3 +246,16 @@ def test_joining_rejects_ambiguous_tables(problem):
 
     with pytest.raises(ValueError):
         join_features(tables)
+
+
+def test_forecast_data_joins_every_feature_table_with_next_value_targets():
+    daily = daily_sample()
+    tables = [TrailingMeanFeatures("value", (1, 2)), TrailingMeanFeatures("value", (4,))]
+
+    built = build_forecast_data(daily, tables, value_col="value")
+
+    expected = prepare_forecast_data(
+        join_features([table(daily) for table in tables]),
+        build_next_observation_targets(daily, value_col="value"),
+    )
+    pd.testing.assert_frame_equal(built, expected)

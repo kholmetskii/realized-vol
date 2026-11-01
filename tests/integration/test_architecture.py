@@ -18,7 +18,8 @@ PACKAGE_DEPENDENCIES = {
     # The command line writes where the shared data layout says.
     "data.sources.dukascopy": {"data.sources.dukascopy", "data"},
     "data.market": {"data.market"},
-    "data.volatility": {"data.volatility", "data.market", "estimators"},
+    # Daily data is found where the shared data layout says.
+    "data.volatility": {"data.volatility", "data", "data.market", "estimators"},
     "estimators": {"estimators", "estimators.variance"},
     "estimators.variance": set(),
 }

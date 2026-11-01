@@ -5,7 +5,13 @@ from typing import cast
 import pandas as pd
 import pytest
 
-from rvol.data.market import full_sessions, prices_per_session, session_window, trading_day
+from rvol.data.market import (
+    full_sessions,
+    prices_per_session,
+    session_window,
+    sessions_per_year,
+    trading_day,
+)
 
 
 def test_trading_day_labels_sunday_evening_as_monday():
@@ -81,3 +87,15 @@ def test_prices_per_session_divides_a_day_by_the_sampling_step(frequency, count)
 def test_prices_per_session_needs_a_step_that_divides_the_session(frequency):
     with pytest.raises(ValueError, match="divide"):
         prices_per_session(frequency)
+
+
+def test_sessions_per_year_counts_the_dates_given():
+    dates = pd.Series(pd.bdate_range("2024-01-01", "2024-12-31"))
+
+    per_year = sessions_per_year(dates.sample(frac=1, random_state=1))
+
+    assert per_year == pytest.approx(
+        (len(dates) - 1) / ((dates.iloc[-1] - dates.iloc[0]).days / 365.25)
+    )
+    with pytest.raises(ValueError, match="two distinct"):
+        sessions_per_year(dates.iloc[:1])

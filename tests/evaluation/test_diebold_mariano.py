@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from scipy.stats import norm
 
-from rvol.evaluation import default_hac_lags, diebold_mariano
+from rvol.evaluation import default_hac_lags, diebold_mariano, hac_lag_grid
 
 
 def test_a_clearly_lower_candidate_loss_is_detected():
@@ -92,3 +92,10 @@ def test_a_constant_positive_difference_is_conclusive_at_any_scale(scale):
     candidate = np.linspace(1.0, 2.0, 30) * scale
 
     assert diebold_mariano(candidate + scale, candidate, hac_lags=2) == (float("inf"), 0.0)
+
+
+def test_the_lag_grid_runs_to_the_default_then_multiples_of_it():
+    usual = default_hac_lags(453)
+
+    assert hac_lag_grid(453) == [*range(usual + 1), 2 * usual, 4 * usual, 6 * usual]
+    assert max(hac_lag_grid(5)) <= 3

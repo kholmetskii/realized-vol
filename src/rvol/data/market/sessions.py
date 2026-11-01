@@ -77,3 +77,16 @@ def full_sessions(
     )
     retained = set(span_hours[span_hours >= min_hours].index)
     return prices[labels.isin(retained)]
+
+
+def sessions_per_year(dates: pd.Series) -> float:
+    """Sessions per calendar year in a run of session dates, counted, not assumed.
+
+    Holidays and data gaps lower the count, so annualizing with it matches the
+    data rather than a nominal five sessions a week.
+    """
+    ordered = pd.DatetimeIndex(dates).sort_values()
+    if len(ordered) < 2 or ordered[-1] == ordered[0]:
+        raise ValueError("at least two distinct session dates are required")
+    years = (ordered[-1] - ordered[0]).days / 365.25
+    return (len(ordered) - 1) / years

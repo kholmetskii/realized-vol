@@ -22,6 +22,13 @@ def default_hac_lags(n_obs: int) -> int:
     return min(rule, n_obs - 2)
 
 
+def hac_lag_grid(n_obs: int, multiples: tuple[int, ...] = (2, 4, 6)) -> list[int]:
+    """Lags for a sensitivity check: none up to the default, then multiples of it."""
+    usual = default_hac_lags(n_obs)
+    lags = {*range(usual + 1), *(multiple * usual for multiple in multiples)}
+    return sorted(lag for lag in lags if lag <= n_obs - 2)
+
+
 def diebold_mariano(
     baseline_loss: ArrayLike,
     candidate_loss: ArrayLike,

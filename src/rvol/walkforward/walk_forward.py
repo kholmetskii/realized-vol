@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 
 import numpy as np
 import pandas as pd
 
-from rvol.models import ForecastModel
+from rvol.models import ForecastModel, ForecastRule
 
 FORECAST_COLUMNS = (
     "model",
@@ -92,3 +93,35 @@ def walk_forward(
     for column in ("origin_date", "target_date"):
         result[column] = pd.to_datetime(result[column])
     return result
+
+
+def walk_forward_models(
+    data: pd.DataFrame,
+    models: Sequence[ForecastModel],
+    *,
+    min_train_size: int,
+    start: date | None = None,
+    end: date | None = None,
+    series: str = "default",
+) -> pd.DataFrame:
+    """``walk_forward`` for every model on the same data, stacked into one table."""
+    if not models:
+        raise ValueError("at least one model is required")
+    runs = [
+        walk_forward(
+            data, model, min_train_size=min_train_size, start=start, end=end, series=series
+        )
+        for model in models
+    ]
+    return pd.concat(runs, ignore_index=True)
+
+
+def fit_known(data: pd.DataFrame, model: ForecastModel, *, before: date) -> ForecastRule:
+    """The model's rule fitted on every row whose target was observed before ``before``."""
+    known = data.loc[pd.DatetimeIndex(data["target_date"]) < pd.Timestamp(before)]
+    if known.empty:
+        raise ValueError("no outcome is observed before that date")
+    return model.rule.fit(
+        known[list(model.regressors)].to_numpy(dtype="float64"),
+        known["target"].to_numpy(dtype="float64"),
+    )

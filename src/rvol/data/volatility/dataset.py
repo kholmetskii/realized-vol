@@ -8,6 +8,7 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 
+from rvol.data.layout import DataLayout
 from rvol.data.market import MIN_SESSION_HOURS, full_sessions, session_labels, session_window
 from rvol.estimators import last_tick_sample, realized_semivariances, realized_variance
 
@@ -200,3 +201,14 @@ def load_daily_dataset(
     target.parent.mkdir(parents=True, exist_ok=True)
     daily.to_parquet(target, index=False)
     return daily
+
+
+def daily_dataset(
+    asset: str, layout: DataLayout | None = None, *, frequency: str = SAMPLING_FREQUENCY
+) -> pd.DataFrame:
+    """An asset's daily dataset from its tick files, through its cache in ``layout``."""
+    paths = layout or DataLayout()
+    ticks = sorted(paths.ticks(asset).glob("*.parquet"))
+    if not ticks:
+        raise FileNotFoundError(f"no tick files in {paths.ticks(asset)}")
+    return load_daily_dataset(ticks, paths.daily_rv(asset, frequency), frequency=frequency)

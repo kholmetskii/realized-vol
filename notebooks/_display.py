@@ -1,4 +1,4 @@
-"""Figures shared by the notebooks: one style, one colour per model, one panel per asset.
+"""Presentation shared by the notebooks: figures, tables, names and colours.
 
 Every figure takes a mapping from an asset's display name to its data and draws
 the same panel for each asset, stacked top to bottom.
@@ -6,6 +6,7 @@ the same panel for each asset, stacked top to bottom.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Mapping, Sequence
 
 import matplotlib.dates as mdates
@@ -14,6 +15,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+
+from rvol.evaluation import StudyDesign
+from rvol.models import ForecastModel
 
 #: Realized values are drawn in a neutral grey; models get the palette in order.
 ACTUAL = "#8a8984"
@@ -47,11 +51,59 @@ def use_style() -> None:
     plt.rcParams.update(STYLE)
 
 
-def model_colors(models: Sequence[str]) -> dict[str, str]:
-    """One palette colour per model, in the order given."""
-    if len(models) > len(PALETTE):
-        raise ValueError(f"at most {len(PALETTE)} models have a colour")
-    return dict(zip(models, PALETTE, strict=False))
+#: Every model name in the notebooks, so a model keeps its colour everywhere.
+COLORS = dict(
+    zip(
+        ["HAR", "historical_mean", "naive", "EWMA", "AR1", "SHAR", "HAR-ridge"],
+        PALETTE,
+        strict=True,
+    )
+)
+MAIN_COLOR = COLORS["HAR"]
+
+
+def pair(asset: str) -> str:
+    """Display name of a currency pair: EURUSD -> EUR/USD."""
+    return f"{asset[:3]}/{asset[3:]}" if len(asset) == 6 else asset
+
+
+def by_asset(frames: Mapping[str, pd.DataFrame], name: str = "asset") -> pd.DataFrame:
+    """Stack per-asset tables under an asset level; with one asset, the table itself."""
+    if len(frames) == 1:
+        return next(iter(frames.values()))
+    return pd.concat({pair(asset): frame for asset, frame in frames.items()}, names=[name])
+
+
+def design_table(design: StudyDesign, assets: Sequence[str]) -> pd.DataFrame:
+    """The study design as a one-column table, for the top of each notebook."""
+    return pd.Series(
+        {
+            "assets": ", ".join(pair(asset) for asset in assets),
+            "minimum training sessions": design.min_train_size,
+            "first forecast target": design.forecast_start,
+            "evaluation start": design.evaluation_start,
+            "last forecast target": design.forecast_end,
+            "candidate model": design.candidate,
+            "loss": design.loss_name,
+        },
+        name="study design",
+    ).to_frame()
+
+
+def model_table(models: Sequence[ForecastModel]) -> pd.DataFrame:
+    """One row per model: its rule, the rule's settings and its regressors."""
+    rows = []
+    for model in models:
+        names = inspect.signature(type(model.rule)).parameters
+        settings = ", ".join(f"{name} = {getattr(model.rule, name)}" for name in names)
+        rows.append(
+            {
+                "rule": type(model.rule).__name__,
+                "settings": settings,
+                "regressors": ", ".join(model.regressors) or "none",
+            }
+        )
+    return pd.DataFrame(rows, index=pd.Index([model.name for model in models], name="model"))
 
 
 def _grid(rows: int, cols: int, row_height: float, *, sharex: bool = False) -> np.ndarray:
