@@ -63,19 +63,19 @@ python -m rvol.data.sources.dukascopy EURUSD 2023-01-01 2023-03-31
 Run the comparison:
 
 ```python
-from rvol import experiment
+from rvol import study
 from rvol.data.layout import DataLayout
 from rvol.data.volatility import build_daily_dataset
 
 daily = build_daily_dataset(sorted(DataLayout().ticks("EURUSD").glob("*.parquet")))
-prepared = experiment.prepare(daily)
-forecasts = experiment.forecast(prepared, experiment.study_models(prepared), asset="EURUSD")
-print(experiment.results_table(experiment.compare(forecasts)))
+prepared = study.prepare(daily)
+forecasts = study.forecast(prepared, study.study_models(prepared), asset="EURUSD")
+print(study.results_table(study.compare(forecasts)))
 ```
 
 The study design (forecast and evaluation dates, the minimum training sample,
-the candidate model, the loss, the ridge grid) is a set of named constants at the top of
-`rvol/experiment.py`; every function uses them as defaults.
+the candidate model, the loss, the ridge grid) is a set of named constants in
+`rvol/study/design.py`; every function uses them as defaults.
 
 The full study, with figures and explanations, is one notebook per asset:
 [`notebooks/01_eurusd.ipynb`](notebooks/01_eurusd.ipynb). Install its extras with
@@ -94,8 +94,8 @@ another pair, copy it and change `ASSET`; only the commentary is written by hand
 | add a | implement | pass to |
 |---|---|---|
 | forecasting rule | a class with `fit(X, y)` returning itself and `predict(X)` | `ForecastModel(name, rule, regressors)` |
-| feature | `TrailingMeanFeatures(column, windows)`, columns named `<column>_mean_<window>` | `experiment.FEATURE_TABLES` |
-| model | `ForecastModel(name, rule, regressors)`, e.g. `ForecastModel("HAR-ridge-1", LinearRegression(ridge=1.0), HAR_FEATURES)` | `experiment.forecast` or `walk_forward` |
+| feature | `TrailingMeanFeatures(column, windows)`, columns named `<column>_mean_<window>` | `study.FEATURE_TABLES` |
+| model | `ForecastModel(name, rule, regressors)`, e.g. `ForecastModel("HAR-ridge-1", LinearRegression(ridge=1.0), HAR_FEATURES)` | `study.forecast` or `walk_forward` |
 | loss | a function `loss(actual, predicted)` returning one loss per forecast | `forecast_losses` |
 
 ## Project layout
@@ -107,7 +107,7 @@ src/rvol/
 ├── models/        forecasting models
 ├── walkforward/   walk-forward forecasts, smearing
 ├── evaluation/    losses, Diebold–Mariano test, robustness checks
-└── experiment.py  the full comparison
+└── study/         the comparison: design, features, models, pipeline
 notebooks/         one study per asset
 tests/             unit and integration tests, laid out like src/rvol/
 ```
@@ -118,7 +118,7 @@ its API from `__init__.py`.
 `models`, `walkforward`, `evaluation` and `data.preparation` know nothing about
 volatility or markets; a test checks their imports and vocabulary.
 Domain code lives in `data.sources`, `data.market`, `data.volatility` and
-`estimators`, and `experiment.py` combines the two.
+`estimators`, and `study` combines the two.
 
 ## Limitations
 

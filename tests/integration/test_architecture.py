@@ -21,8 +21,9 @@ PACKAGE_DEPENDENCIES = {
     "data.volatility": {"data.volatility", "data.market", "estimators"},
     "estimators": {"estimators", "estimators.variance"},
     "estimators.variance": set(),
-    "experiment": {
-        "experiment",
+    # The study is the one package that joins the generic tools to the volatility data.
+    "study": {
+        "study",
         "walkforward",
         "data.preparation",
         "evaluation",
@@ -64,8 +65,8 @@ def rvol_dependencies(path: pathlib.Path) -> set[str]:
 
 def test_architecture_rules_cover_every_package():
     packages = {source_module(path) for path in PACKAGE_ROOT.rglob("__init__.py")}
-    # Array formulas and the experiment module keep their own dependency boundaries.
-    assert set(PACKAGE_DEPENDENCIES) == packages | {"estimators.variance", "experiment"}
+    # Array formulas keep their own dependency boundary inside estimators.
+    assert set(PACKAGE_DEPENDENCIES) == packages | {"estimators.variance"}
     for name in PACKAGE_DEPENDENCIES:
         path = PACKAGE_ROOT.joinpath(*name.split(".")) if name else PACKAGE_ROOT
         assert (path / "__init__.py").is_file() or path.with_suffix(".py").is_file()

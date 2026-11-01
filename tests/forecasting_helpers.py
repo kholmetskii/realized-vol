@@ -8,7 +8,7 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
-from rvol import experiment
+from rvol import study
 from rvol.data.preparation import (
     build_next_observation_targets,
     join_features,
@@ -33,21 +33,21 @@ def daily_sample(n: int = 85) -> pd.DataFrame:
     return with_semivariances(daily)
 
 
-ALL_FEATURES = tuple(column for table in experiment.FEATURE_TABLES for column in table.columns)
-LATEST = experiment.LOG_RV_MEANS.column(1)
-benchmark_models = experiment.benchmark_models
+ALL_FEATURES = tuple(column for table in study.FEATURE_TABLES for column in table.columns)
+LATEST = study.LOG_RV_MEANS.column(1)
+benchmark_models = study.benchmark_models
 
 
 def study_features(names: tuple[str, ...] = ALL_FEATURES) -> Callable[[pd.DataFrame], pd.DataFrame]:
     """The study's feature tables restricted to the named columns, so the
     warm-up follows the longest window those columns use."""
     builders = []
-    for table in experiment.FEATURE_TABLES:
+    for table in study.FEATURE_TABLES:
         windows = tuple(window for window in table.windows if table.column(window) in names)
         if windows:
             builders.append(dataclasses.replace(table, windows=windows))
     if not builders:  # no regressors: keep the full origin timeline
-        builders.append(dataclasses.replace(experiment.LOG_RV_MEANS, windows=()))
+        builders.append(dataclasses.replace(study.LOG_RV_MEANS, windows=()))
     return lambda daily: join_features([build(daily) for build in builders])
 
 
@@ -59,7 +59,7 @@ def prepared_log_rv(
     daily = daily_sample(n)
     return prepare_forecast_data(
         study_features(feature_columns)(daily),
-        build_next_observation_targets(daily, value_col=experiment.LOG_RV),
+        build_next_observation_targets(daily, value_col=study.LOG_RV),
     )
 
 
