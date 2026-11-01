@@ -64,13 +64,9 @@ Run the comparison:
 
 ```python
 from rvol import study
-from rvol.data.layout import DataLayout
-from rvol.data.volatility import build_daily_dataset
 
-daily = build_daily_dataset(sorted(DataLayout().ticks("EURUSD").glob("*.parquet")))
-prepared = study.prepare(daily)
-forecasts = study.forecast(prepared, study.study_models(prepared), asset="EURUSD")
-print(study.results_table(study.compare(forecasts)))
+run = study.run_study("EURUSD")  # daily data from data/ticks/EURUSD, then the whole study
+print(study.results_table(run.comparison))
 ```
 
 The study design (forecast and evaluation dates, the minimum training sample,

@@ -25,7 +25,9 @@ PACKAGE_DEPENDENCIES = {
     "study": {
         "study",
         "walkforward",
+        "data",
         "data.preparation",
+        "data.volatility",
         "evaluation",
         "models",
     },

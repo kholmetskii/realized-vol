@@ -1,3 +1,4 @@
+import inspect
 import subprocess
 import sys
 from datetime import date
@@ -157,8 +158,20 @@ def test_ridge_calibration_needs_a_penalty():
 
 
 def specification(models):
-    """What defines each model before fitting: name, rule and settings, regressors."""
-    return [(m.name, type(m.rule), vars(m.rule), m.regressors) for m in models]
+    """What defines each model before fitting: name, rule, its settings, regressors.
+
+    Settings are the rule's constructor arguments, so fitting a model (which adds
+    estimated attributes) does not change its specification.
+    """
+    return [
+        (
+            m.name,
+            type(m.rule),
+            {name: getattr(m.rule, name) for name in inspect.signature(type(m.rule)).parameters},
+            m.regressors,
+        )
+        for m in models
+    ]
 
 
 def test_every_study_choice_is_made_before_the_evaluation_period():

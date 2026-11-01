@@ -12,7 +12,8 @@ variance scale with Duan smearing and scores them with ``LOSS`` and DM tests.
 
 This is the one package that joins the generic forecasting tools to the
 volatility data. ``design`` holds the study's fixed choices, ``features`` the
-target and inputs, ``models`` the models compared, ``pipeline`` the steps.
+target and inputs, ``models`` the models compared, ``pipeline`` the steps, and
+``runs`` one asset's whole study, from its tick files to the comparison.
 """
 
 from rvol.study.design import (
@@ -46,6 +47,7 @@ from rvol.study.models import (
     study_models,
 )
 from rvol.study.pipeline import Comparison, compare, forecast, results_table
+from rvol.study.runs import StudyRun, run_study, study_run
 
 __all__ = [
     "ASSETS",
@@ -67,6 +69,7 @@ __all__ = [
     "RIDGE_GRID",
     "SHAR_FEATURES",
     "Comparison",
+    "StudyRun",
     "benchmark_models",
     "calibrated_models",
     "compare",
@@ -75,5 +78,7 @@ __all__ = [
     "results_table",
     "ridge_calibration",
     "ridge_har",
+    "run_study",
     "study_models",
+    "study_run",
 ]
