@@ -19,17 +19,24 @@ from matplotlib.figure import Figure
 from rvol.evaluation import StudyDesign
 from rvol.models import ForecastModel
 
+#: Light figures, so they read on GitHub's white page; a dark editor can invert
+#: them (PyCharm: "Invert image outputs for dark themes").
+BACKGROUND = "#fcfcfb"
+INK = "#52514e"
+EDGE = "#8a8984"
+GRID = "#e6e5e0"
 #: Realized values are drawn in a neutral grey; models get the palette in order.
 ACTUAL = "#8a8984"
 PALETTE = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#7c5cd6", "#3fa7b5")
-BACKGROUND = "#fcfcfb"
-INK = "#52514e"
+#: CSS for the highlighted cell in a styled table. The text colour is set too, so
+#: the cell stays readable when the editor's theme draws table text light.
+HIGHLIGHT = "background-color: #cde2fb; color: #1e1f22"
 
 STYLE = {
     "figure.dpi": 110,
     "figure.facecolor": BACKGROUND,
     "axes.facecolor": BACKGROUND,
-    "axes.edgecolor": ACTUAL,
+    "axes.edgecolor": EDGE,
     "axes.labelcolor": INK,
     "axes.titlesize": 11,
     "axes.titleweight": "bold",
@@ -37,13 +44,15 @@ STYLE = {
     "axes.spines.top": False,
     "axes.spines.right": False,
     "axes.grid": True,
-    "grid.color": "#e6e5e0",
+    "grid.color": GRID,
     "grid.linewidth": 0.6,
     "xtick.color": INK,
     "ytick.color": INK,
     "font.size": 10,
     "legend.frameon": False,
     "lines.linewidth": 1.4,
+    "text.color": INK,
+    "legend.labelcolor": INK,
 }
 
 
