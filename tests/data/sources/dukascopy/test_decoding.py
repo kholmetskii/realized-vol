@@ -2,6 +2,7 @@
 exactly those values back."""
 
 import pandas as pd
+import pytest
 
 from rvol.data.sources.dukascopy import decode_hour, point_divider
 from tests.data.sources.dukascopy.fakes import HOUR, make_bi5
@@ -32,6 +33,26 @@ def test_empty_hour_is_not_an_error():
     assert len(decode_hour(make_bi5([]), HOUR, 1e5)) == 0
 
 
-def test_jpy_uses_a_different_divider():
-    assert point_divider("USDJPY") == 1e3
-    assert point_divider("EURUSD") == 1e5
+@pytest.mark.parametrize(
+    ("symbol", "raw_price", "price"),
+    [
+        # Integer prices observed in the week of 2023-01-09, and the price each
+        # instrument traded at then.
+        ("EURUSD", 107524, 1.07524),
+        ("USDJPY", 131816, 131.816),
+        ("XAUUSD", 1879095, 1879.095),
+        ("USA500IDXUSD", 3940397, 3940.397),
+    ],
+)
+def test_point_divider_gives_the_traded_price(symbol, raw_price, price):
+    df = decode_hour(make_bi5([(0, raw_price, raw_price, 1.0, 1.0)]), HOUR, point_divider(symbol))
+    assert df["ask"].iloc[0] == pytest.approx(price, rel=1e-12)
+
+
+def test_point_divider_ignores_case():
+    assert point_divider("xauusd") == point_divider("XAUUSD")
+
+
+def test_unknown_symbol_has_no_point_divider():
+    with pytest.raises(ValueError, match="no point divider known for 'GBPUSD'"):
+        point_divider("GBPUSD")

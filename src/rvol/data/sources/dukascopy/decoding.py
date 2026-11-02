@@ -21,13 +21,33 @@ RECORD = np.dtype(
 )
 
 
-def point_divider(symbol: str) -> float:
-    """Integer price divider: JPY pairs quote to 3 decimals, other FX pairs to 5.
+#: Integer price divider per instrument. Each entry was checked by decoding the
+#: week of 2023-01-09 and comparing the price with the instrument's known level
+#: then: EURUSD 107524 -> 1.075, USDJPY 131816 -> 131.8, XAUUSD (gold, in USD
+#: per ounce) 1879095 -> 1879, USA500IDXUSD (S&P 500 CFD) 3940397 -> 3940.
+POINT_DIVIDERS: dict[str, float] = {
+    "EURUSD": 1e5,
+    "USDJPY": 1e3,
+    "XAUUSD": 1e3,
+    "USA500IDXUSD": 1e3,
+}
 
-    Other instruments may use other dividers; a wrong one rescales every price
-    by a constant, which leaves log returns and RV unchanged.
+
+def point_divider(symbol: str) -> float:
+    """The integer price divider of a known instrument.
+
+    A wrong divider would store every price scaled by a constant. Log returns
+    and RV would not change, but the prices would be silently wrong, so an
+    unknown symbol raises instead of guessing.
     """
-    return 1e3 if "JPY" in symbol.upper() else 1e5
+    try:
+        return POINT_DIVIDERS[symbol.upper()]
+    except KeyError:
+        raise ValueError(
+            f"no point divider known for {symbol!r}: decode one hour with divisor 1, "
+            "compare the integer price with the instrument's known price level, "
+            "and add the power of ten to POINT_DIVIDERS"
+        ) from None
 
 
 def decode_hour(raw: bytes | None, hour_start: dt.datetime, divisor: float) -> pd.DataFrame:
